@@ -1,0 +1,275 @@
+function SetRustDeskByMagnetarMan {
+    <#
+    .SYNOPSIS
+        Configura ed installa RustDesk con configurazioni personalizzata su Windows.
+
+    .DESCRIPTION
+        Script ottimizzato per fermare servizi, reinstallare RustDesk e applicare configurazioni personalizzate.
+        Scarica i file di configurazione da repository GitHub e riavvia il sistema per applicare le modifiche.
+
+    .PARAMETER CountdownSeconds
+        Numero di secondi per il countdown prima del riavvio.
+
+    #>
+
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [int]$CountdownSeconds = 30,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$SuppressIndividualReboot
+    )
+
+    # Variabili di configurazione
+    $RustDeskConfig     = "$env:APPDATA\RustDesk\config"
+    $RustDeskInstaller  = "$env:LOCALAPPDATA\WinToolkit\rustdesk\rustdesk-installer.msi"
+    $RustDeskConfigPath = "$env:APPDATA\RustDesk\config"
+
+    # 1. Inizializzazione logging
+    IInitialize-ToolLogging -ToolName "SetRustDesk"
+        Show-Header -SubTitle "RustDesk Setup"
+
+    # Funzioni Helper Locali
+    function Stop-RustDeskComponents {
+        $servicesFound = $false
+        foreach ($service in @("RustDesk", "rustdesk")) {
+            $serviceObj = Get-Service -Name $service -ErrorAction SilentlyContinue
+            if ($serviceObj) {
+                Stop-Service -Name $service -Force -ErrorAction SilentlyContinue
+                $servicesFound = $true
+            }
+        }
+
+        if ($servicesFound) {
+            Write-StyledMessage Success "Servizi RustDesk arrestati"
+        }
+
+        $processesFound = $false
+        foreach ($process in @("rustdesk", "RustDesk")) {
+            $runningProcesses = Get-Process -Name $process -ErrorAction SilentlyContinue
+            if ($runningProcesses) {
+                $runningProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+                $processesFound = $true
+            }
+        }
+
+        if ($processesFound) {
+            Write-StyledMessage Success "Processi RustDesk terminati"
+        }
+
+        if (-not $servicesFound -and -not $processesFound) {
+            Write-StyledMessage Warning "Nessun componente RustDesk attivo trovato"
+        }
+
+        Start-Sleep 2
+    }
+
+    function Get-LatestRustDeskRelease {
+        try {
+            $apiUrl = $AppConfig.URLs.RustDeskReleaseAPI
+            $response = Invoke-RestMethod -Uri $apiUrl -Method Get -ErrorAction Stop
+            $msiAsset = $response.assets | Where-Object { $_.name -like "rustdesk-*-x86_64.msi" } | Select-Object -First 1
+
+            if ($msiAsset) {
+                return @{
+                    Version     = $response.tag_name
+                    DownloadUrl = $msiAsset.browser_download_url
+                    FileName    = $msiAsset.name
+                }
+            }
+
+            Write-StyledMessage -Type 'Error' -Text "Nessun installer .msi trovato nella release"
+            return $null
+        }
+        catch {
+            Write-StyledMessage -Type 'Error' -Text "Errore connessione GitHub API: $($_.Exception.Message)"
+            return $null
+        }
+    }
+
+    function Download-RustDeskInstaller {
+        param([string]$DownloadPath)
+
+        Write-StyledMessage -Type 'Info' -Text "Download installer RustDesk in corso..."
+        $releaseInfo = Get-LatestRustDeskRelease
+        if (-not $releaseInfo) { return $false }
+
+        Write-StyledMessage -Type 'Info' -Text "📥 Versione rilevata: $($releaseInfo.Version)"
+        $parentDir = Split-Path $DownloadPath -Parent
+
+        try {
+            if (-not (Test-Path $parentDir)) {
+                New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
+            }
+
+            if (Test-Path $DownloadPath) {
+                Remove-Item $DownloadPath -Force -ErrorAction Stop
+            }
+
+            Invoke-WebRequest -Uri $releaseInfo.DownloadUrl -OutFile $DownloadPath -UseBasicParsing -ErrorAction Stop
+
+            if (Test-Path $DownloadPath) {
+                Write-StyledMessage -Type 'Success' -Text "Installer $($releaseInfo.FileName) scaricato con successo"
+                return $true
+            }
+        }
+        catch {
+            Write-StyledMessage -Type 'Error' -Text "Errore download: $($_.Exception.Message)"
+        }
+
+        return $false
+    }
+
+    function Install-RustDesk {
+        param([string]$InstallerPath)
+
+        Write-StyledMessage -Type 'Info' -Text "Installazione RustDesk"
+
+        try {
+            $installArgs = "/i", "`"$InstallerPath`"", "/quiet", "/norestart"
+            $process = Start-Process "msiexec.exe" -ArgumentList $installArgs -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop
+            Start-Sleep 10
+
+            if ($process.ExitCode -eq 0) {
+                Write-StyledMessage -Type 'Success' -Text "RustDesk installato"
+                return $true
+            }
+            else {
+                Write-StyledMessage -Type 'Error' -Text "Errore installazione (Exit Code: $($process.ExitCode))"
+            }
+        }
+        catch {
+            Write-StyledMessage -Type 'Error' -Text "Errore durante installazione: $($_.Exception.Message)"
+        }
+
+        return $false
+    }
+
+    function Clear-RustDeskConfig {
+        Write-StyledMessage Info "Pulizia configurazioni esistenti..."
+        $rustDeskDir = $RustDeskConfigPath
+        $configDir = "$rustDeskDir\config"
+
+        try {
+            if (-not (Test-Path $rustDeskDir)) {
+                New-Item -ItemType Directory -Path $rustDeskDir -Force | Out-Null
+                Write-StyledMessage Info "Cartella RustDesk creata"
+            }
+
+            if (Test-Path $configDir) {
+                Remove-Item $configDir -Recurse -Force -ErrorAction Stop
+                Write-StyledMessage Success "Cartella config eliminata"
+                Start-Sleep 1
+            }
+            else {
+                Write-StyledMessage Warning "Cartella config non trovata"
+            }
+        }
+        catch {
+            Write-StyledMessage Error "Errore pulizia config: $($_.Exception.Message)"
+        }
+    }
+
+    function Download-RustDeskConfigFiles {
+        Write-StyledMessage Info "Download file di configurazione..."
+        $configDir = "$env:APPDATA\RustDesk\config"
+
+        try {
+            if (-not (Test-Path $configDir)) {
+                New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+            }
+
+            $configUrls = @{
+                "RustDesk.toml"       = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/RustDesk.toml"
+                "RustDesk_local.toml" = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/RustDesk_local.toml"
+                "RustDesk2.toml"      = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/RustDesk2.toml"
+            }
+
+            $downloaded = 0
+
+            foreach ($fileName in $configUrls.Keys) {
+                $url = $configUrls[$fileName]
+                $filePath = Join-Path $configDir $fileName
+
+                try {
+                    Invoke-WebRequest -Uri $url -OutFile $filePath -UseBasicParsing -ErrorAction Stop
+                    $downloaded++
+                }
+                catch {
+                    Write-StyledMessage Error "Errore download $fileName`: $($_.Exception.Message)"
+                }
+            }
+
+            if ($downloaded -eq $configUrls.Count) {
+                Write-StyledMessage Success "Tutti i file di configurazione scaricati ($downloaded/$($configUrls.Count))"
+            }
+            else {
+                Write-StyledMessage Warning "Scaricati $downloaded/$($configUrls.Count) file di configurazione"
+            }
+        }
+        catch {
+            Write-StyledMessage Error "Errore durante download configurazioni: $($_.Exception.Message)"
+        }
+    }
+
+    # === ESECUZIONE PRINCIPALE ===
+    Write-StyledMessage Info "🚀 AVVIO CONFIGURAZIONE RUSTDESK"
+
+    try {
+        $installerPath = $RustDeskInstaller
+
+        # FASE 1: Stop servizi e processi
+        Write-StyledMessage Info "📋 FASE 1: Arresto servizi e processi RustDesk"
+        Stop-RustDeskComponents
+
+        # FASE 2: Download e installazione
+        Write-StyledMessage Info "📋 FASE 2: Download e installazione"
+        if (-not (Download-RustDeskInstaller -DownloadPath $installerPath)) {
+            Write-StyledMessage Error "Impossibile procedere senza l'installer"
+            return
+        }
+
+        if (-not (Install-RustDesk -InstallerPath $installerPath)) {
+            Write-StyledMessage Error "Errore durante l'installazione"
+            return
+        }
+
+        # FASE 3: Verifica processi e pulizia
+        Write-StyledMessage Info "📋 FASE 3: Verifica processi e pulizia"
+        Stop-RustDeskComponents
+
+        # FASE 4: Pulizia configurazioni
+        Write-StyledMessage Info "📋 FASE 4: Pulizia configurazioni"
+        Clear-RustDeskConfig
+
+        # FASE 5: Download configurazioni
+        Write-StyledMessage Info "📋 FASE 5: Download configurazioni"
+        Download-RustDeskConfigFiles
+
+        Write-Host ""
+        Write-StyledMessage Success "🎉 CONFIGURAZIONE RUSTDESK COMPLETATA"
+        Write-StyledMessage Info "🔄 Per applicare le modifiche il PC verrà riavviato"
+
+        if ($SuppressIndividualReboot) {
+            $Global:NeedsFinalReboot = $true
+            Write-StyledMessage -Type 'Info' -Text "🚫 Riavvio individuale soppresso. Verrà gestito un riavvio finale."
+        }
+        else {
+            $shouldReboot = Start-InterruptibleCountdown -Seconds $CountdownSeconds -Message "Per applicare le modifiche è necessario riavviare il sistema"
+            if ($shouldReboot) {
+                Restart-Computer -Force
+            }
+        }
+    }
+    catch {
+        Write-StyledMessage Error "ERRORE CRITICO: $($_.Exception.Message)"
+        Write-StyledMessage Info "💡 Verifica connessione Internet e riprova"
+    }
+    finally {
+        Write-Host "`nPremi INVIO per uscire..." -ForegroundColor Gray
+        Read-Host | Out-Null
+        Write-StyledMessage Success "🎯 Setup RustDesk terminato"
+        try { Stop-Transcript | Out-Null } catch {}
+    }
+}

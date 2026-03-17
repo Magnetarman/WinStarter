@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Script di inizio che installa e configura Win Starter.
 .DESCRIPTION
@@ -24,7 +24,7 @@ $Global:MsgStyles = @{
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.1.8"
+        Version = "Version 1.1.9"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -1098,8 +1098,10 @@ function Create-WinSupportShortcut {
         $link = $shell.CreateShortcut($shortcut)
         $link.TargetPath = $script:AppConfig.Paths.wtExe
         $rustdeskUrl = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/SetRustDesk.ps1"
-        $cmdString = "irm '$rustdeskUrl' | iex"
-        $link.Arguments = "pwsh -ExecutionPolicy Bypass -Command `"$cmdString`""
+        # Costruiamo un comando semplice, senza virgolette annidate complicate,
+        # per essere robusti anche quando lo script è eseguito via `irm ... | iex`.
+        $cmdString = "iex (irm '$rustdeskUrl')"
+        $link.Arguments = "pwsh -ExecutionPolicy Bypass -Command '$cmdString'"
         $link.WorkingDirectory = $script:AppConfig.Paths.WinToolkitDir
         if (Test-Path $iconIco) { $link.IconLocation = "$iconIco,0" }
         $link.Description = "Assistenza Win Support"

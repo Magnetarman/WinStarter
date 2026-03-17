@@ -24,7 +24,7 @@ $Global:MsgStyles = @{
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.1.5"
+        Version = "Version 1.1.6"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -250,7 +250,8 @@ function Set-PathPermissions {
         $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($administratorsGroup, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
         $acl.SetAccessRule($accessRule)
         Set-Acl -Path $FolderPath -AclObject $acl -ErrorAction Stop
-    } catch { }
+    }
+    catch { }
 }
 
 function Set-WingetPathPermissions {
@@ -263,7 +264,8 @@ function Set-WingetPathPermissions {
         $arch = if ([Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" }
         $wingetDir = Get-ChildItem -Path "$env:ProgramFiles\WindowsApps" -Filter "Microsoft.DesktopAppInstaller_*_*${arch}__8wekyb3d8bbwe" -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
         if ($wingetDir) { $wingetFolderPath = $wingetDir.FullName }
-    } catch { }
+    }
+    catch { }
     if ($wingetFolderPath) {
         Set-PathPermissions -FolderPath $wingetFolderPath
     }
@@ -284,7 +286,8 @@ function Invoke-WingetCommand {
         $procParams = @{ FilePath = 'winget'; ArgumentList = $finalArgs -split ' '; Wait = $true; PassThru = $true; NoNewWindow = $true }
         $process = Start-Process @procParams
         return @{ ExitCode = $process.ExitCode }
-    } catch {
+    }
+    catch {
         return @{ ExitCode = -1 }
     }
 }
@@ -307,7 +310,8 @@ function Test-WingetFunctionality {
             return $true
         }
         return $false
-    } catch {
+    }
+    catch {
         return $false
     }
 }
@@ -361,7 +365,8 @@ function Repair-WingetDatabase {
         Update-EnvironmentPath
         Start-Sleep 2
         return $true
-    } catch {
+    }
+    catch {
         return $false
     }
 }
@@ -812,7 +817,8 @@ function Install-PspEnvironment {
         Invoke-WebRequest -Uri $script:AppConfig.URLs.PowerShellProfile -OutFile $targetProfile -UseBasicParsing | Out-Null
         
         Write-StyledMessage -Type Success -Text "✅ Profilo bash customizzato applicato."
-    } catch { }
+    }
+    catch { }
 
     # Terminal Settings
     try {
@@ -824,7 +830,8 @@ function Install-PspEnvironment {
                 Write-StyledMessage -Type Success -Text "✅ Regole visive Terminal iniettate correttamente."
             }
         }
-    } catch { }
+    }
+    catch { }
 }
 
 # ============================================================================
@@ -973,12 +980,13 @@ function Invoke-AdvancedTweaks {
         try {
             icacls $Env:OneDrive /deny "Administrators:(D,DC)" | Out-Null
             Start-Process 'C:\Windows\System32\OneDriveSetup.exe' -ArgumentList '/uninstall' -Wait -ErrorAction SilentlyContinue
-            Stop-Process -Name FileCoAuth,Explorer -Force -ErrorAction SilentlyContinue
+            Stop-Process -Name FileCoAuth, Explorer -Force -ErrorAction SilentlyContinue
             Remove-Item "$Env:LocalAppData\Microsoft\OneDrive" -Recurse -Force -ErrorAction SilentlyContinue
             Remove-Item "C:\ProgramData\Microsoft OneDrive" -Recurse -Force -ErrorAction SilentlyContinue
             icacls $Env:OneDrive /grant "Administrators:(D,DC)" | Out-Null
             Set-Service -Name OneSyncSvc -StartupType Disabled -ErrorAction SilentlyContinue
-        } catch { }
+        }
+        catch { }
 
         Write-StyledMessage -Type Success -Text "✅ Tweak avanzati di sistema applicati con successo."
     }
@@ -1006,10 +1014,12 @@ function Install-RequiredApps {
             $process = Start-Process -FilePath winget -ArgumentList "install --id $($app.Id) --silent --accept-package-agreements --accept-source-agreements" -Wait -NoNewWindow -PassThru
             if ($process.ExitCode -eq 0 -or $process.ExitCode -eq -1978335215) {
                 Write-StyledMessage -Type Success -Text "✅ $($app.Name) installato o già presente nel sistema."
-            } else {
+            }
+            else {
                 Write-StyledMessage -Type Warning -Text "⚠️ Installazione di $($app.Name) fallita (ExitCode: $($process.ExitCode))."
             }
-        } catch {
+        }
+        catch {
             Write-StyledMessage -Type Warning -Text "⚠️ Errore d'installazione per $($app.Name): $($_.Exception.Message)"
         }
     }
@@ -1037,7 +1047,8 @@ function Deploy-CustomAssets {
         if (-not (Test-Path $ptDest)) { New-Item -Path $ptDest -ItemType Directory -Force | Out-Null }
         Copy-Item -Path "$ptExtract\*" -Destination $ptDest -Recurse -Force
         Write-StyledMessage -Type Success -Text "✅ Configurazioni PowerToys iniettate con successo."
-    } catch {
+    }
+    catch {
         Write-StyledMessage -Type Warning -Text "⚠️ Impossibile configurare PowerToys: $($_.Exception.Message)"
     }
 
@@ -1053,7 +1064,8 @@ function Deploy-CustomAssets {
         if (-not (Test-Path $nsDest)) { New-Item -Path $nsDest -ItemType Directory -Force | Out-Null }
         Copy-Item -Path "$nsExtract\*" -Destination $nsDest -Recurse -Force
         Write-StyledMessage -Type Success -Text "✅ Preset Nilesoft Shell applicato con successo."
-    } catch {
+    }
+    catch {
         Write-StyledMessage -Type Warning -Text "⚠️ Impossibile configurare Nilesoft Shell: $($_.Exception.Message)"
     }
     
@@ -1085,7 +1097,7 @@ function Create-WinSupportShortcut {
         $shell = New-Object -ComObject WScript.Shell
         $link = $shell.CreateShortcut($shortcut)
         $link.TargetPath = $script:AppConfig.Paths.wtExe
-        $link.Arguments = 'pwsh -NoProfile -ExecutionPolicy Bypass -Command "irm installazione RustDesk | iex"'
+        $link.Arguments = 'pwsh -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/RustDesk/SetRustDesk.ps1 | iex"'
         $link.WorkingDirectory = $script:AppConfig.Paths.WinToolkitDir
         if (Test-Path $iconIco) { $link.IconLocation = "$iconIco,0" }
         $link.Description = "Assistenza Win Support"
@@ -1167,7 +1179,8 @@ function Invoke-WinStarterSetup {
                 if (-not (Test-Path $registryPath)) { $null = New-Item -Path $registryPath -Force }
                 Set-ItemProperty -Path $registryPath -Name 'DelegationTerminal' -Value '{E12F0936-0E6F-548E-A9F6-B20C69A27D17}' -Force
                 Set-ItemProperty -Path $registryPath -Name 'DelegationConsole' -Value '{B23D10C0-31E3-401A-97EF-4BB30B62E10B}' -Force
-            } catch { }
+            }
+            catch { }
         }
         Install-PspEnvironment
 
@@ -1192,7 +1205,8 @@ function Invoke-WinStarterSetup {
                 $wtArgs = "-w 0 new-tab -p `"PowerShell`" -d . pwsh.exe -ExecutionPolicy Bypass -NoExit -Command `"Write-Host '✅ Ambiente Pronto. Configurazione Winstarter conclusa!' -ForegroundColor Green`""
                 Start-Process -FilePath "wt.exe" -ArgumentList $wtArgs
                 exit
-            } catch { }
+            }
+            catch { }
         }
 
         Write-StyledMessage -Type Success -Text "🎉 Configurazione Win Starter conclusa brillantemente! Il sistema è pronto."

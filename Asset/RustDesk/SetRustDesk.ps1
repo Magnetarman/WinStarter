@@ -21,7 +21,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Host.UI.RawUI.WindowTitle = "Set RustDesk By MagnetarMan"
-$ToolkitVersion = "1.0.1"
+$ToolkitVersion = "1.0.2"
 
 $RustDeskConfig = "$env:APPDATA\RustDesk\config"
 $RustDeskInstaller = "$env:LOCALAPPDATA\WinToolkit\rustdesk\rustdesk-installer.msi"
@@ -249,11 +249,11 @@ Write-StyledMessage Info "🚀 AVVIO CONFIGURAZIONE RUSTDESK"
 try {
     if (-not (Download-RustDeskInstaller -DownloadPath $RustDeskInstaller)) {
         Write-StyledMessage Error "Impossibile procedere senza l'installer"
-        goto :End
+        exit 1
     }
     if (-not (Install-RustDesk -InstallerPath $RustDeskInstaller)) {
         Write-StyledMessage Error "Errore durante l'installazione"
-        goto :End
+        exit 1
     }
 
     Write-StyledMessage Info "📋 Arresto servizi e processi RustDesk"
@@ -276,21 +276,15 @@ try {
     else {
         $shouldReboot = Start-InterruptibleCountdown -Seconds $CountdownSeconds -Message "Per applicare le modifiche è necessario riavviare il sistema"
         if ($shouldReboot) { Restart-Computer -Force }
-        else { Write-StyledMessage Success "🎉 Configurazione RustDesk completata (riavvio annullato)"; break }
-    }
-    else {
-        $shouldReboot = Start-InterruptibleCountdown -Seconds $CountdownSeconds -Message "Per applicare le modifiche è necessario riavviare il sistema"
-        if ($shouldReboot) { Restart-Computer -Force }
+        else { Write-StyledMessage Success "🎉 Configurazione RustDesk completata (riavvio annullato)" }
     }
 }
 catch {
     Write-StyledMessage Error "ERRORE CRITICO: $($_.Exception.Message)"
     Write-StyledMessage Info "💡 Verifica connessione Internet e riprova"
+    exit 1
 }
 finally {
-    :End
-    Write-Host "`nPremi INVIO per uscire..." -ForegroundColor Gray
-    Read-Host | Out-Null
     Write-StyledMessage Success "🎯 Setup RustDesk terminato"
     try { Stop-Transcript | Out-Null } catch {}
     exit 0

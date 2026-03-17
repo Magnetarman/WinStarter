@@ -25,6 +25,8 @@ Win Starter è uno script PowerShell che automatizza la configurazione iniziale 
 > - **Connessione a Internet** (per download di Winget, app e asset);
 > - **Esecuzione come Amministratore** (lo script richiederà il riavvio con privilegi elevati se necessario);
 > - **Windows 10** (build 16299 o superiore) oppure **Windows 11**.
+>
+> Inoltre, per evitare blocchi o falsi positivi (soprattutto durante la riparazione di Winget e l’installazione di pacchetti MSIX/AppX), è **consigliato disattivare temporaneamente Microsoft Defender / SmartScreen** prima dell’esecuzione e riattivarlo a fine operazione.
 
 | Versioni di Windows | Supportato                    |
 | :------------------ | :---------------------------- |

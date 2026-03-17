@@ -51,15 +51,10 @@ irm https://magnetarman.com/winstarter | iex
 
 6. Segui le istruzioni a video; al termine troverai sul Desktop la scorciatoia **Win Support** (assistenza remota) e un ambiente già configurato.
 
-### 👨‍💻 Esecuzione da file locale
+## 🪱 Bug Noti - Fix in corso…
 
-Se hai clonato il repository:
-
-```powershell
-# Da cartella WinStarter, come Amministratore
-Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
-.\winstarter.ps1
-```
+- Barre di progressione non correttamente soppresse nell'output
+- PowerToys avvia lo splash screen generale, dovrebbe avviarsi ridotto ad icona senza splash screen
 
 ---
 

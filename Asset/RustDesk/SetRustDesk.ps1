@@ -21,10 +21,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Host.UI.RawUI.WindowTitle = "Set RustDesk By MagnetarMan"
-$ToolkitVersion = "1.0.0"
+$ToolkitVersion = "1.0.1"
 
-$RustDeskConfig     = "$env:APPDATA\RustDesk\config"
-$RustDeskInstaller  = "$env:LOCALAPPDATA\WinToolkit\rustdesk\rustdesk-installer.msi"
+$RustDeskConfig = "$env:APPDATA\RustDesk\config"
+$RustDeskInstaller = "$env:LOCALAPPDATA\WinToolkit\rustdesk\rustdesk-installer.msi"
 $RustDeskConfigPath = "$env:APPDATA\RustDesk\config"
 $RustDeskReleaseAPI = "https://api.github.com/repos/rustdesk/rustdesk/releases/latest"
 
@@ -271,7 +271,12 @@ try {
 
     if ($SuppressIndividualReboot) {
         $Global:NeedsFinalReboot = $true
-        Write-StyledMessage -Type 'Info' -Text "🚫 Riavvio individuale soppresso. Verrà gestito un riavvio finale."
+        Write-StyledMessage -Type 'Info' -Text "❌ Riavvio individuale soppresso. Verrà gestito un riavvio finale."
+    }
+    else {
+        $shouldReboot = Start-InterruptibleCountdown -Seconds $CountdownSeconds -Message "Per applicare le modifiche è necessario riavviare il sistema"
+        if ($shouldReboot) { Restart-Computer -Force }
+        else { Write-StyledMessage Success "🎉 Configurazione RustDesk completata (riavvio annullato)"; break }
     }
     else {
         $shouldReboot = Start-InterruptibleCountdown -Seconds $CountdownSeconds -Message "Per applicare le modifiche è necessario riavviare il sistema"
@@ -288,4 +293,5 @@ finally {
     Read-Host | Out-Null
     Write-StyledMessage Success "🎯 Setup RustDesk terminato"
     try { Stop-Transcript | Out-Null } catch {}
+    exit 0
 }

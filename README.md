@@ -8,11 +8,11 @@
 
 <p>
 	<img src="https://img.shields.io/github/license/Magnetarman/WinStarter?style=for-the-badge&logo=opensourceinitiative&logoColor=white&color=0080ff" alt="license">
-	<img src="https://img.shields.io/badge/version-1.2.3-green.svg?style=for-the-badge" alt="versione">
+	<img src="https://img.shields.io/badge/version-1.3.1-green.svg?style=for-the-badge" alt="versione">
 	<img src="https://img.shields.io/github/last-commit/Magnetarman/WinStarter?style=for-the-badge&logo=git&logoColor=white&color=9370DB" alt="last-commit">
 </p>
 
-Win Starter è uno script PowerShell che automatizza la configurazione iniziale di Windows: verifica e ripara **Winget**, installa software essenziali (PowerToys, Everything, Nilesoft Shell, UniGet UI), applica **tweak di sistema** per ridurre bloatware e telemetria, e prepara un ambiente terminale moderno con PowerShell 7, Windows Terminal, Oh My Posh e strumenti da riga di comando. Infine inserisce l'icona di WinToolkit sul desktop e l'icona per effettuare il deploy di Rust Desk con una configurazione personalizzata per effettuare supporto remoto. Un solo comando per portare il sistema allo stato desiderato.
+Win Starter è uno script PowerShell che automatizza la configurazione iniziale di Windows: verifica e ripara **Winget**, installa software essenziali (PowerToys, Everything, Nilesoft Shell, UniGet UI), applica **tweak di sistema** per ridurre bloatware e telemetria, e prepara un ambiente terminale moderno con PowerShell 7, Windows Terminal, Oh My Posh e strumenti da riga di comando. Un solo comando per portare il sistema allo stato desiderato.
 
 ---
 
@@ -27,7 +27,7 @@ Win Starter è uno script PowerShell che automatizza la configurazione iniziale 
 > - **Disattiva temporaneamente Windows Defender (Protezione in tempo reale)**: alcuni passaggi (soprattutto la riparazione di Winget) possono essere bloccati da **falsi positivi** e portare a fallimenti “catastrofici” della riparazione. Al termine **riattivalo**.
 > - **Windows 10** (build 16299 o superiore) oppure **Windows 11**.
 >
-> Inoltre, per evitare blocchi o falsi positivi (soprattutto durante la riparazione di Winget e l’installazione di pacchetti MSIX/AppX), è **consigliato disattivare temporaneamente Microsoft Defender / SmartScreen** prima dell’esecuzione e riattivarlo a fine operazione.
+
 
 | Versioni di Windows | Supportato                    |
 | :------------------ | :---------------------------- |
@@ -49,86 +49,66 @@ Win Starter è uno script PowerShell che automatizza la configurazione iniziale 
 irm https://magnetarman.com/winstarter | iex
 ```
 
-6. Segui le istruzioni a video; al termine troverai sul Desktop la scorciatoia **Win Support** (assistenza remota) e un ambiente già configurato.
+6. Segui le istruzioni a video; al termine avrai un ambiente Windows ottimizzato e già configurato.
 
 ## 🐛 Bug Noti - Fix in corso…
 
 - Barre di progressione non correttamente soppresse nell'output
 - PowerToys avvia lo splash screen generale, dovrebbe avviarsi ridotto ad icona senza splash screen
 - Disabilitazione delle notifiche di PowerToys nelle notifiche di windows
-- 
 
 ---
 
 ## 👾 Componenti e funzioni
 
-Lo script è organizzato in blocchi funzionali. Di seguito una guida alle funzioni principali e al flusso di esecuzione.
+Lo script è organizzato in blocchi funzionali. Di seguito una guida al flusso di esecuzione e alle funzioni principali.
 
-### Utilità base e presentazione
+### Sicurezza e Windows Update
 
-| Funzione                                    | Descrizione                                                            |
-| ------------------------------------------- | ---------------------------------------------------------------------- |
-| **Format-CenteredText**                     | Centra il testo nel terminale per l’intestazione.                      |
-| **Show-Header**                             | Pulisce lo schermo e mostra il banner ASCII "Win Starter".             |
-| **Write-StyledMessage**                     | Stampa messaggi con icone (✅ ⚠️ ❌ 💎) e li registra nel file di log. |
-| **Start-ToolkitLog** / **Write-ToolkitLog** | Inizializza e scrive il log in `%LOCALAPPDATA%\WinStarter\logs`.       |
+| Funzione                                   | Descrizione                                                                                                                                           |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Blocco Connessione a Consumo**           | Identifica la rete attiva e la imposta temporaneamente come "A Consumo" (`Cost=2`) per bloccare il download di aggiornamenti durante l'esecuzione.    |
+| **Impostazioni Windows Update**            | Blocca aggiornamenti driver, posticipa Feature/Quality updates (365/4 gg) e disabilita il riavvio automatico via Registry.                              |
+| **Riavvio Servizio WU**                    | Riavvia forzatamente `wuauserv` all'inizio per applicare immediatamente le nuove policy di aggiornamento.                                             |
+| **Ripristino Connessione**                 | Al termine del setup, ripristina la rete su "Illimitata" (`Cost=1`) per consentire il normale funzionamento.                                          |
 
-### Winget e permessi
+### Winget e Riparazione
 
-| Funzione                                                | Descrizione                                                                                             |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| **Start-AppxSilentProcess**                             | Installa pacchetti AppX/MSIX in background senza finestre di progresso.                                 |
-| **Stop-InterferingProcess**                             | Termina processi che bloccano Winget (Store, AppInstaller, winget, ecc.).                               |
-| **Invoke-ForceCloseWinget**                             | Chiude tutti i processi Winget per liberare lock sui file.                                              |
-| **Update-EnvironmentPath**                              | Ricarica il PATH nel processo corrente dopo nuove installazioni.                                        |
-| **Set-PathPermissions** / **Set-WingetPathPermissions** | Corregge i permessi sulla cartella di installazione di Winget (Administrators = FullControl).           |
-| **Invoke-WingetCommand**                                | Esegue comandi Winget con timeout e flag `--disable-interactivity` se supportato.                       |
-| **Test-WingetFunctionality**                            | Verifica che Winget sia nel PATH e risponda (es. `winget --version`).                                   |
-| **Test-WingetCompatibility**                            | Controlla che la build di Windows supporti Winget (>= 16299).                                           |
-| **Repair-WingetDatabase**                               | Ripristina un database Winget corrotto: pulisce cache, resetta sorgenti e permessi.                     |
-| **Test-WingetDeepValidation**                           | Simula un uso reale (es. `winget search`) e, in caso di crash (ACCESS_VIOLATION), avvia la riparazione. |
-| **Install-WingetCore**                                  | Rimedio estremo: scarica il bundle MSIX da GitHub e reinstalla Winget.                                  |
+| Funzione                       | Descrizione                                                                                             |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| **Test-WingetFunctionality**   | Verifica che Winget risponda correttamente nel PATH.                                                    |
+| **Repair-WingetDatabase**      | Ripristina il database Winget se corrotto: pulisce cache, resetta sorgenti e corregge permessi.         |
+| **Test-WingetDeepValidation**  | Esegue un test di ricerca reale e, in caso di crash (`ACCESS_VIOLATION`), avvia la riparazione drastica. |
+| **Install-WingetCore**         | Fallback finale: reinstalla Winget scaricando il bundle MSIX ufficiale da GitHub.                       |
 
-### Installazione componenti sistema
+### Ambiente Shell e App
 
-| Funzione                       | Descrizione                                                                                                                                                                                                                                   |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Install-PowerShellCore**     | Installa PowerShell 7 tramite Winget se non presente; necessario per evitare limiti della 5.1.                                                                                                                                                |
-| **Install-WindowsTerminalApp** | Installa Windows Terminal (ID 9N0DX20HK701) da Microsoft Store tramite Winget.                                                                                                                                                                |
-| **Install-PspEnvironment**     | Configura l’ambiente shell: installa **Oh My Posh**, **zoxide**, **btop**, **fastfetch**, **JetBrains Mono Nerd Font**; scarica tema Oh My Posh (atomic), profilo PowerShell e `settings.json` di Windows Terminal dal repository WinToolkit. |
+| Funzione                       | Descrizione                                                                                                                                                |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Install-PowerShellCore**     | Installa PowerShell 7 e migra l'esecuzione dal PowerShell 5.1 legacy per supportare i moduli moderni.                                                      |
+| **Install-WindowsTerminalApp** | Installa l'app Windows Terminal e la imposta come terminale predefinito di sistema.                                                                        |
+| **Install-PspEnvironment**     | Configura Oh My Posh, zoxide, btop, fastfetch e i font Nerd; scarica profilo e temi personalizzati dal repository.                                          |
+| **Install-RequiredApps**       | Installa in blocco: **UniGet UI**, **PowerToys**, **Everything** e **Nilesoft Shell**, pulendo eventuali shortcut superflue dal desktop.                   |
+| **Deploy-CustomAssets**        | Applica preset e configurazioni per PowerToys e Nilesoft Shell iniettando i file nelle directory di sistema.                                               |
 
-### Funzioni core Win Starter
+### Tweak e Personalizzazione
 
-| Funzione                        | Descrizione                                                                                                                                                                                                                                                                                                                                         |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **SetRecommendedUpdate**        | Mitiga Windows Update: disabilita aggiornamenti driver da WU, posticipa Feature Update (365 gg) e Quality Update (4 gg), disabilita riavvio automatico e metadati driver da rete.                                                                                                                                                                   |
-| **Set-ExplorerPersonalization** | Personalizza Esplora file e shell: estensioni visibili, cartella predefinita “Questo PC”, dark mode (app e sistema), rimozione suggerimenti Bing dalla ricerca, BSOD dettagliato, icone desktop (Computer, Rete, Cestino, ecc.).                                                                                                                    |
-| **Invoke-AdvancedTweaks**       | Tweak avanzati: disabilita funzionalità consumer (CloudContent), “Chiudi” dalla barra delle applicazioni, **menu contestuale classico** (click destro), priorità IPv4, limiti a Edge (no shortcut desktop, no personalization/reporting, Do Not Track), **disabilitazione Windows Copilot** (HKLM + HKCU), **disinstallazione e pulizia OneDrive**. |
-| **Install-RequiredApps**        | Installa in blocco tramite Winget: **UniGet UI**, **PowerToys**, **Everything**, **Everything PowerToys**, **Nilesoft Shell**.                                                                                                                                                                                                                      |
-| **Deploy-CustomAssets**         | Scarica dal repository gli asset preconfigurati (PowerToys.zip, NilesoftShell.zip), li estrae e li copia nelle cartelle di PowerToys e Nilesoft Shell.                                                                                                                                                                                              |
-| **Create-WinSupportShortcut**   | Crea sul Desktop il collegamento **Win Support** che avvia Windows Terminal con comando per l’installazione/assistenza remota (RustDesk); usa l’icona scaricata da repository.                                                                                                                                                                      |
-
-### Flusso principale: Invoke-WinStarterSetup
-
-1. **Controllo privilegi**: se non si è amministratori, lo script si riavvia con `RunAs`.
-2. **Pre-transizione**: aggiorna PATH, verifica Winget; se non funziona, installa/ripara Winget e esegue la validazione “deep”.
-3. **Transizione a PowerShell 7**: se lo script è partito con PowerShell 5.1 e PowerShell 7 è installato, si riavvia in `pwsh.exe` (con `WINTOOLKIT_RESUME=1`) per proseguire in ambiente moderno.
-4. **Setup essenziale**: installa Windows Terminal e lo imposta come terminale predefinito (registro), poi esegue **Install-PspEnvironment**.
-5. **Baseline OS**: applica **SetRecommendedUpdate**, **Set-ExplorerPersonalization**, **Invoke-AdvancedTweaks**; riavvia Explorer.
-6. **Deploy**: **Install-RequiredApps**, **Deploy-CustomAssets**, **Create-WinSupportShortcut**.
-7. **Chiusura**: se non si è già in Windows Terminal, apre una nuova finestra WT con messaggio di completamento; altrimenti mostra messaggio e attende un tasto.
+| Funzione                        | Descrizione                                                                                                                                              |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Set-ExplorerPersonalization** | Abilita estensioni file, Dark Mode, visualizzazione BSOD dettagliata e pulisce icone desktop predefinite.                                                |
+| **Invoke-AdvancedTweaks**       | Tweak profondi: disabilita Copilot, OneDrive, telemetria Edge, rimuove Teams Free e ripristina il **Menu Contestuale Classico** (Windows 10 style).      |
+| **Restart-ExplorerSafe**        | Riavvia la shell `explorer.exe` in modo sicuro per rendere effettive tutte le modifiche visive e al registro.                                            |
 
 ---
 
 ## 📁 Percorsi importanti
 
-| Descrizione                  | Percorso                                            |
-| ---------------------------- | --------------------------------------------------- |
-| Log di Win Starter           | `%LOCALAPPDATA%\WinStarter\logs`                    |
-| Directory temporanea setup   | `%TEMP%\WinStarterSetup`                            |
-| Configurazione PowerToys     | `%LOCALAPPDATA%\Microsoft\PowerToys`                |
-| Nilesoft Shell               | `%ProgramFiles%\Nilesoft Shell`                     |
-| Icona / contesto Win Support | `%LOCALAPPDATA%\WinToolkit` (WinSupport.png / .ico) |
+| Descrizione                | Percorso                             |
+| -------------------------- | ------------------------------------ |
+| Log di Win Starter         | `%LOCALAPPDATA%\WinStarter\logs`     |
+| Directory temporanea setup | `%TEMP%\WinStarterSetup`             |
+| Configurazione PowerToys   | `%LOCALAPPDATA%\Microsoft\PowerToys` |
+| Nilesoft Shell             | `%ProgramFiles%\Nilesoft Shell`      |
 
 ---
 

@@ -8,7 +8,7 @@
 
 <p>
 	<img src="https://img.shields.io/github/license/Magnetarman/WinStarter?style=for-the-badge&logo=opensourceinitiative&logoColor=white&color=0080ff" alt="license">
-	<img src="https://img.shields.io/badge/version-1.3.5-green.svg?style=for-the-badge" alt="versione">
+	<img src="https://img.shields.io/badge/version-1.3.6-green.svg?style=for-the-badge" alt="versione">
 	<img src="https://img.shields.io/github/last-commit/Magnetarman/WinStarter?style=for-the-badge&logo=git&logoColor=white&color=9370DB" alt="last-commit">
 </p>
 
@@ -51,9 +51,8 @@ irm https://magnetarman.com/winstarter | iex
 
 6. Segui le istruzioni a video; al termine avrai un ambiente Windows ottimizzato e già configurato.
 
-## 🐛 Bug Noti - Fix in corso…
-
-- Barre di progressione non correttamente soppresse nell'output
+## 🐛 Bug Noti
+- Nessun bug noto rilevante. (Fix barre di progressione completato nella v1.3.6)
 
 ---
 

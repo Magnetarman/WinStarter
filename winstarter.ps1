@@ -85,7 +85,7 @@ try { Restart-Service -Name wuauserv -Force -ErrorAction SilentlyContinue } catc
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.3.4"
+        Version = "Version 1.3.6"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -1121,26 +1121,31 @@ function Invoke-AdvancedTweaks {
         $ProgressPreference = 'SilentlyContinue'
 
         # Rimozione app Teams consumer (Microsoft.Teams.Free)
-        Write-StyledMessage -Type Info -Text "🗑️ Rimozione Microsoft Teams (Free)..."
+        $oldProgress = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        Write-StyledMessage -Type Info -Text "Sto eseguendo: Rimozione Microsoft Teams (Free)..."
         try {
             $teamsNames = @('Microsoft.Teams.Free', 'MicrosoftTeams')
 
             foreach ($n in $teamsNames) {
                 Get-AppxPackage -Name $n -AllUsers -ErrorAction SilentlyContinue | ForEach-Object {
-                    try { Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue *>$null } catch { }
+                    Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue *>$null
                 }
                 Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -eq $n } | ForEach-Object {
-                    try { Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue *>$null } catch { }
+                    Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue *>$null
                 }
             }
-            Write-StyledMessage -Type Success -Text "✅ Teams Free rimosso (se presente)."
+            Write-StyledMessage -Type Success -Text "Fatto: Rimozione Microsoft Teams."
         }
         catch {
-            Write-StyledMessage -Type Warning -Text "⚠️ Errore rimozione Teams Free: $($_.Exception.Message)"
+            Write-StyledMessage -Type Warning -Text "Errore rimozione Teams Free: $($_.Exception.Message)"
         }
+        $ProgressPreference = $oldProgress
 
         # Disabilitazione/rimozione app Copilot + task collegati
-        Write-StyledMessage -Type Info -Text "🧹 Disabilitazione app e componenti Copilot..."
+        $oldProgress = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        Write-StyledMessage -Type Info -Text "Sto eseguendo: Disabilitazione app e componenti Copilot..."
         try {
             # Rimuovi pacchetti AppX Copilot per utente/i e provisioning
             $copilotNamePatterns = @(
@@ -1150,29 +1155,27 @@ function Invoke-AdvancedTweaks {
 
             foreach ($pat in $copilotNamePatterns) {
                 Get-AppxPackage -AllUsers -Name $pat -ErrorAction SilentlyContinue | ForEach-Object {
-                    try { Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue *>$null } catch { }
+                    Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue *>$null
                 }
             }
 
             Get-AppxProvisionedPackage -Online |
             Where-Object { $_.DisplayName -like '*Copilot*' } |
             ForEach-Object {
-                try { Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue *>$null } catch { }
+                Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue *>$null
             }
 
             # Disabilita eventuali scheduled task Copilot (se presenti)
-            try {
-                Get-ScheduledTask -ErrorAction SilentlyContinue |
-                Where-Object { $_.TaskName -match 'Copilot' -or $_.TaskPath -match 'Copilot' } |
-                ForEach-Object { try { Disable-ScheduledTask -TaskName $_.TaskName -TaskPath $_.TaskPath -ErrorAction SilentlyContinue | Out-Null } catch { } }
-            }
-            catch { }
+            Get-ScheduledTask -ErrorAction SilentlyContinue |
+            Where-Object { $_.TaskName -match 'Copilot' -or $_.TaskPath -match 'Copilot' } |
+            ForEach-Object { Disable-ScheduledTask -TaskName $_.TaskName -TaskPath $_.TaskPath -ErrorAction SilentlyContinue | Out-Null }
 
-            Write-StyledMessage -Type Success -Text "✅ Copilot disabilitato/rimosso (dove applicabile)."
+            Write-StyledMessage -Type Success -Text "Fatto: Disabilitazione componenti Copilot."
         }
         catch {
-            Write-StyledMessage -Type Warning -Text "⚠️ Errore disabilitazione Copilot: $($_.Exception.Message)"
+            Write-StyledMessage -Type Warning -Text "Errore disabilitazione Copilot: $($_.Exception.Message)"
         }
+        $ProgressPreference = $oldProgress
 
         # Ripristiniamo la preferenza progressi
         $ProgressPreference = $oldProgress

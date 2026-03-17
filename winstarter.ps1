@@ -1413,8 +1413,8 @@ function New-WinToolkitDesktopShortcut {
         }
         $link.TargetPath = $wtExe
         $toolkitUrl = $script:AppConfig.URLs.WinToolkitScript
-        # Escaping speciale per i comandi passati a wt.exe
-        $link.Arguments = "pwsh.exe -NoProfile -ExecutionPolicy Bypass -Command `"\"irm '$toolkitUrl' | iex\"`""
+        # Escaping pulito per i comandi passati a wt.exe o powershell.exe
+        $link.Arguments = "pwsh.exe -NoProfile -ExecutionPolicy Bypass -Command `"irm '$toolkitUrl' | iex`""
         $link.WorkingDirectory = $script:AppConfig.Paths.wtDir
         if (Test-Path $iconPath) { $link.IconLocation = "$iconPath,0" }
         $link.Description = "WinToolkit"

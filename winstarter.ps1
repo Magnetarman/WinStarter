@@ -21,24 +21,30 @@ $Global:MsgStyles = @{
     Progress = @{ Icon = '🔄'; Color = 'Magenta' }
 }
 
-# --- BLOCCO TEMPORANEO CONNESSIONE A CONSUMO ---
-# Impedisce a Windows Update di scaricare aggiornamenti durante l'esecuzione
-Write-Host "🌐 Verifica connettività per blocco temporaneo aggiornamenti..." -ForegroundColor Cyan
+# --- BLOCCO TEMPORANEO CONNESSIONE A CONSUMO E RETE PRIVATA ---
+# Impedisce a Windows Update di scaricare aggiornamenti e ottimizza la connettività
+Write-Host "🌐 Ottimizzazione rete per blocco temporaneo aggiornamenti..." -ForegroundColor Cyan
 $activeProfile = Get-NetConnectionProfile | Where-Object { $_.IPv4Connectivity -eq 'Internet' -or $_.IPv6Connectivity -eq 'Internet' }
 
 if ($activeProfile) {
-    $guid = $activeProfile.InstanceGuid
     $networkName = $activeProfile.Name
-    $regPathMetered = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles\$guid"
+    $interfaceIndex = $activeProfile.InterfaceIndex
+    $Global:OriginalNetworkCategory = $activeProfile.NetworkCategory
+    $regPathMetered = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles\$($activeProfile.InstanceGuid)"
 
     try {
+        # Cambia il profilo in Privato per evitare blocchi firewall/discovery
+        Set-NetConnectionProfile -InterfaceIndex $interfaceIndex -NetworkCategory Private
+        Write-Host "✅ Rete '$networkName' impostata come PRIVATA." -ForegroundColor Green
+
+        # Imposta Connessione a Consumo (Metered) via registro
         Set-ItemProperty -Path $regPathMetered -Name "Cost" -Value 2 -ErrorAction Stop
-        Write-Host "✅ La rete '$networkName' è stata impostata come 'A Consumo' per bloccare gli aggiornamenti." -ForegroundColor Green
+        Write-Host "✅ Connessione a consumo ATTIVATA per '$networkName'." -ForegroundColor Green
     } catch {
-        Write-Host "⚠️ Impossibile impostare la rete come 'A Consumo'. Assicurati di avere privilegi di Amministratore." -ForegroundColor Yellow
+        Write-Host "⚠️ Errore durante l'ottimizzazione rete: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 } else {
-    Write-Host "⚠️ Nessuna connessione attiva a Internet trovata per il blocco 'A Consumo'." -ForegroundColor Yellow
+    Write-Host "⚠️ Nessuna connessione attiva a Internet trovata per l'ottimizzazione." -ForegroundColor Yellow
 }
 
 # --- IMPOSTAZIONI WINDOWS UPDATE ---
@@ -82,7 +88,7 @@ try { Restart-Service -Name wuauserv -Force -ErrorAction SilentlyContinue } catc
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.3.1"
+        Version = "Version 1.3.2"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -982,40 +988,6 @@ function Install-PspEnvironment {
 # FUNZIONI CORE WINSTARTER
 # ============================================================================
 
-function Configure-PowerToysSettings {
-    <#
-    .SYNOPSIS
-    Configura PowerToys per avviarsi senza splash screen e disabilita le notifiche di Windows
-    #>
-    param([string]$PowerToysDir)
-    try {
-        $configPath = Join-Path $PowerToysDir "settings.json"
-        if (Test-Path $configPath) {
-            $config = Get-Content $configPath -Raw | ConvertFrom-Json
-            
-            # Avvio senza splash screen
-            if ($config.PowerToys -and $config.PowerToys.General) {
-                $config.PowerToys.General.ShowSplashScreen = $false
-                $config.PowerToys.General.StartupBehavior = "Minimized"
-            }
-            
-            # Disabilita notifiche di PowerToys
-            if ($config.PowerToys -and $config.PowerToys.General) {
-                $config.PowerToys.General.ShowNotifications = $false
-            }
-            
-            # Salva configurazione modificata
-            $config | ConvertTo-Json -Depth 32 | Set-Content $configPath -Encoding UTF8
-            Write-StyledMessage -Type Success -Text "✅ PowerToys configurato: avvio minimizzato e notifiche disabilitate."
-        }
-        else {
-            Write-StyledMessage -Type Warning -Text "⚠️ File settings.json di PowerToys non trovato."
-        }
-    }
-    catch {
-        Write-StyledMessage -Type Warning -Text "⚠️ Errore configurazione PowerToys: $($_.Exception.Message)"
-    }
-}
 
 
 
@@ -1321,54 +1293,33 @@ function Restart-ExplorerSafe {
     }
 }
 
-function Install-RequiredApps {
+function Install-PowerToysExperience {
     <#
     .SYNOPSIS
-    Installa il pacchetto applicativo selezionato da Roadmap silenziosamente tramite Winget in blocco sequenziale.
+    Installa e ottimizza l'esperienza PowerToys, Everything, Nilesoft Shell e UniGetUI in un unico blocco.
     #>
-    $apps = @(
-        @{ Id = "MartiCliment.UniGetUI"; Name = "Winget UI" },
-        @{ Id = "Microsoft.PowerToys"; Name = "PowerToys" },
-        @{ Id = "voidtools.Everything"; Name = "Everything" },
-        @{ Id = "9N2DRHJ970D9"; Name = "EverythingPowerToys" },
-        @{ Id = "nilesoft.shell"; Name = "Nilesoft Shell" }
-    )
+    Write-StyledMessage -Type Info -Text "🚀 Avvio installazione e ottimizzazione PowerToys Experience..."
 
-    foreach ($app in $apps) {
-        Write-StyledMessage -Type Info -Text "⬇️ Installazione $($app.Name) tramite Winget in corso..."
-        try {
-            $process = Start-Process -FilePath winget -ArgumentList "install --id $($app.Id) --silent --accept-package-agreements --accept-source-agreements" -Wait -NoNewWindow -PassThru
-            if ($process.ExitCode -eq 0 -or $process.ExitCode -eq -1978335215) {
-                Write-StyledMessage -Type Success -Text "✅ $($app.Name) installato o già presente nel sistema."
-                # Ripulisci il Desktop dai collegamenti creati automaticamente
-                if ($app.Id -eq 'voidtools.Everything') {
-                    Remove-DesktopShortcutsIfPresent -ShortcutNames @('Everything.lnk')
-                }
-                elseif ($app.Id -eq 'MartiCliment.UniGetUI') {
-                    Remove-DesktopShortcutsIfPresent -ShortcutNames @('UniGetUI.lnk', 'WingetUI.lnk', 'WinGetUI.lnk')
-                }
-            }
-            else {
-                Write-StyledMessage -Type Warning -Text "⚠️ Installazione di $($app.Name) fallita (ExitCode: $($process.ExitCode))."
-            }
-        }
-        catch {
-            Write-StyledMessage -Type Warning -Text "⚠️ Errore d'installazione per $($app.Name): $($_.Exception.Message)"
-        }
-    }
-}
+    # 1. Installazione Everything (necessario prima o del plugin)
+    Write-StyledMessage -Type Info -Text "📦 Installazione voidtools Everything..."
+    $null = Invoke-WingetCommand -Arguments "install voidtools.Everything --silent --accept-package-agreements --accept-source-agreements"
 
-function Deploy-CustomAssets {
-    <#
-    .SYNOPSIS
-    Applica i temi custom di config alle app terze precedentemente installate scaricandoli dal repository.
-    #>
-    Write-StyledMessage -Type Info -Text "📦 Avvio download e applicazione asset pre-configurati..."
-    
+    # 2. Installazione PowerToys
+    Write-StyledMessage -Type Info -Text "📦 Installazione Microsoft PowerToys..."
+    $null = Invoke-WingetCommand -Arguments "install Microsoft.PowerToys --silent --accept-package-agreements --accept-source-agreements"
+
+    # 3. Kill processo PowerToys per permettere modifiche ai file di config
+    Write-StyledMessage -Type Info -Text "🛑 Chiusura PowerToys per applicazione configurazioni..."
+    Stop-Process -Name "PowerToys" -Force -ErrorAction SilentlyContinue
+
+    # 4. Installazione EverythingPowerToys Plugin
+    Write-StyledMessage -Type Info -Text "📦 Installazione EverythingPowerToys Plugin..."
+    $null = Invoke-WingetCommand -Arguments "install 9N2DRHJ970D9 --silent --accept-package-agreements --accept-source-agreements"
+
+    # 5. Import configurazioni PowerToys dal repository
     $tempDir = $script:AppConfig.Paths.Temp
     if (-not (Test-Path $tempDir)) { New-Item -Path $tempDir -ItemType Directory -Force | Out-Null }
-
-    # PowerToys Inject
+    
     try {
         Write-StyledMessage -Type Info -Text "⚙️ Distribuzione configurazioni personalizzate PowerToys..."
         $ptZip = Join-Path $tempDir "PowerToys.zip"
@@ -1379,13 +1330,38 @@ function Deploy-CustomAssets {
         $ptDest = $script:AppConfig.Paths.PowerToysDir
         if (-not (Test-Path $ptDest)) { New-Item -Path $ptDest -ItemType Directory -Force | Out-Null }
         Copy-Item -Path "$ptExtract\*" -Destination $ptDest -Recurse -Force
-        Write-StyledMessage -Type Success -Text "✅ Configurazioni PowerToys iniettate con successo."
+        Write-StyledMessage -Type Success -Text "✅ Configurazioni PowerToys importate."
     }
     catch {
-        Write-StyledMessage -Type Warning -Text "⚠️ Impossibile configurare PowerToys: $($_.Exception.Message)"
+        Write-StyledMessage -Type Warning -Text "⚠️ Errore import configurazioni PowerToys: $($_.Exception.Message)"
     }
 
-    # Nilesoft Shell Menu
+    # 6. Applica cambiamenti JSON PowerToys (snake_case)
+    try {
+        $configPath = Join-Path $script:AppConfig.Paths.PowerToysDir "settings.json"
+        if (Test-Path $configPath) {
+            $config = Get-Content $configPath -Raw | ConvertFrom-Json
+            
+            # Impostazioni nomi esatti JSON PowerToys (snake_case)
+            $config.properties.show_experience_on_update = $false
+            $config.properties.startup_behavior = "minimized"
+            $config.properties.show_status_menu_experience = $false 
+            $config.properties.show_notifications = $false
+            
+            $configJson = $config | ConvertTo-Json -Depth 32
+            [System.IO.File]::WriteAllText($configPath, $configJson)
+            Write-StyledMessage -Type Success -Text "✅ Impostazioni JSON PowerToys (snake_case) applicate."
+        }
+    }
+    catch {
+        Write-StyledMessage -Type Warning -Text "⚠️ Errore applicazione impostazioni JSON PowerToys: $($_.Exception.Message)"
+    }
+
+    # 7. Installazione Nilesoft Shell
+    Write-StyledMessage -Type Info -Text "📦 Installazione Nilesoft Shell..."
+    $null = Invoke-WingetCommand -Arguments "install nilesoft.shell --silent --accept-package-agreements --accept-source-agreements"
+
+    # 8. Applica configurazione personalizzata Nilesoft Shell
     try {
         Write-StyledMessage -Type Info -Text "⚙️ Distribuzione configurazioni personalizzate Nilesoft Shell..."
         $nsZip = Join-Path $tempDir "NilesoftShell.zip"
@@ -1396,12 +1372,35 @@ function Deploy-CustomAssets {
         $nsDest = $script:AppConfig.Paths.NilesoftDir
         if (-not (Test-Path $nsDest)) { New-Item -Path $nsDest -ItemType Directory -Force | Out-Null }
         Copy-Item -Path "$nsExtract\*" -Destination $nsDest -Recurse -Force
-        Write-StyledMessage -Type Success -Text "✅ Preset Nilesoft Shell applicato con successo."
+        Write-StyledMessage -Type Success -Text "✅ Configurazione Nilesoft Shell applicata."
     }
     catch {
-        Write-StyledMessage -Type Warning -Text "⚠️ Impossibile configurare Nilesoft Shell: $($_.Exception.Message)"
+        Write-StyledMessage -Type Warning -Text "⚠️ Errore configurazione Nilesoft Shell: $($_.Exception.Message)"
     }
-    
+
+    # 9. Installazione Winget UI (UniGetUI)
+    Write-StyledMessage -Type Info -Text "📦 Installazione MartiCliment.UniGetUI..."
+    $null = Invoke-WingetCommand -Arguments "install MartiCliment.UniGetUI --silent --accept-package-agreements --accept-source-agreements"
+
+    # 10. Elimina icone sul desktop residue
+    Write-StyledMessage -Type Info -Text "🧽 Pulizia icone desktop..."
+    Remove-DesktopShortcutsIfPresent -ShortcutNames @('Everything.lnk', 'UniGetUI.lnk', 'WingetUI.lnk', 'WinGetUI.lnk')
+
+    # 11. Riavvio PowerToys ridotto ad icona
+    Write-StyledMessage -Type Info -Text "🔄 Riavvio PowerToys..."
+    $ptExe = Get-Command "PowerToys.exe" -ErrorAction SilentlyContinue
+    if ($ptExe) {
+        Start-Process $ptExe.Source -ArgumentList "--minimized"
+        Write-StyledMessage -Type Success -Text "✅ PowerToys riavviato minimizzato."
+    } else {
+        $ptPath = Join-Path $env:ProgramFiles "PowerToys\PowerToys.exe"
+        if (Test-Path $ptPath) {
+            Start-Process $ptPath -ArgumentList "--minimized"
+            Write-StyledMessage -Type Success -Text "✅ PowerToys riavviato minimizzato (fallback path)."
+        }
+    }
+
+    # Pulizia temporanei
     Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
@@ -1496,8 +1495,7 @@ function Invoke-WinStarterSetup {
         Restart-ExplorerSafe
 
         # Fase di Deploy Pacchetti e Asset Winstarter
-        Install-RequiredApps
-        Deploy-CustomAssets
+        Install-PowerToysExperience
 
         # Se siamo in terminal Host ma Windows Terminal è stato installato sposta l'utente la dentro alla fine
         if (-not ($env:WT_SESSION) -and (Get-Command "wt.exe" -ErrorAction SilentlyContinue)) {
@@ -1512,15 +1510,20 @@ function Invoke-WinStarterSetup {
 
         Write-StyledMessage -Type Success -Text "🎉 Configurazione Win Starter conclusa brillantemente! Il sistema è pronto."
 
-        # --- RIPRISTINO CONNESSIONE ILLIMITATA ---
+        # --- RIPRISTINO CONNESSIONE ILLIMITATA E CATEGORIA ORIGINALE ---
         Write-Host "🌐 Ripristino connettività standard..." -ForegroundColor Cyan
         $activeProfile = Get-NetConnectionProfile | Where-Object { $_.IPv4Connectivity -eq 'Internet' -or $_.IPv6Connectivity -eq 'Internet' }
         if ($activeProfile) {
-            $guid = $activeProfile.InstanceGuid
-            $regPathMetered = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles\$guid"
+            $interfaceIndex = $activeProfile.InterfaceIndex
+            $regPathMetered = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles\$($activeProfile.InstanceGuid)"
             try {
+                # Ripristina la categoria originale
+                if ($Global:OriginalNetworkCategory) {
+                    Set-NetConnectionProfile -InterfaceIndex $interfaceIndex -NetworkCategory $Global:OriginalNetworkCategory
+                }
+                # Ripristina il costo illimitato
                 Set-ItemProperty -Path $regPathMetered -Name "Cost" -Value 1 -ErrorAction Stop
-                Write-Host "✅ Connettività ripristinata su 'Illimitata'." -ForegroundColor Green
+                Write-Host "✅ Connettività e categoria di rete ripristinate." -ForegroundColor Green
             } catch { }
         }
 

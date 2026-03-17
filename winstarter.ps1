@@ -24,7 +24,7 @@ $Global:MsgStyles = @{
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.2.3"
+        Version = "Version 1.2.4"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -1093,10 +1093,10 @@ function Invoke-AdvancedTweaks {
 
             foreach ($n in $teamsNames) {
                 Get-AppxPackage -Name $n -AllUsers -ErrorAction SilentlyContinue | ForEach-Object {
-                    try { Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue } catch { }
+                    try { Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue *>$null } catch { }
                 }
                 Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -eq $n } | ForEach-Object {
-                    try { Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue | Out-Null } catch { }
+                    try { Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue *>$null } catch { }
                 }
             }
             Write-StyledMessage -Type Success -Text "✅ Teams Free rimosso (se presente)."
@@ -1116,14 +1116,14 @@ function Invoke-AdvancedTweaks {
 
             foreach ($pat in $copilotNamePatterns) {
                 Get-AppxPackage -AllUsers -Name $pat -ErrorAction SilentlyContinue | ForEach-Object {
-                    try { Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue } catch { }
+                    try { Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue *>$null } catch { }
                 }
             }
 
             Get-AppxProvisionedPackage -Online |
             Where-Object { $_.DisplayName -like '*Copilot*' } |
             ForEach-Object {
-                try { Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue | Out-Null } catch { }
+                try { Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue *>$null } catch { }
             }
 
             # Disabilita eventuali scheduled task Copilot (se presenti)
@@ -1367,7 +1367,7 @@ function Create-WinSupportShortcut {
             Invoke-WebRequest -Uri $script:AppConfig.URLs.WinSupportIcon -OutFile $iconPath -UseBasicParsing
         }
 
-        # Genera Shortcut programmatica al file wt.exe eseguendo il payload
+        # Collegamento che avvia Windows Terminal (wt.exe) con il payload RustDesk
         $shell = New-Object -ComObject WScript.Shell
         $link = $shell.CreateShortcut($shortcut)
         $wtExe = $script:AppConfig.Paths.wtExe
@@ -1375,13 +1375,10 @@ function Create-WinSupportShortcut {
             $wtCmd = Get-Command "wt.exe" -ErrorAction SilentlyContinue
             if ($wtCmd -and $wtCmd.Source) { $wtExe = $wtCmd.Source }
         }
-        $link.TargetPath = $wtExe
+        $link.TargetPath  = if ($wtExe) { $wtExe } else { 'wt.exe' }
         $rustdeskUrl = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/SetRustDesk.ps1"
-        # Escaping speciale per i comandi passati a wt.exe
-        $link.Arguments = "pwsh.exe -NoProfile -ExecutionPolicy Bypass -Command `"\"irm '$rustdeskUrl' | iex\"`""
-        # La cartella di lavoro deve essere quella di WindowsApps,
-        # così il campo "Da" del collegamento risulta corretto.
-        $link.WorkingDirectory = $script:AppConfig.Paths.wtDir
+        $link.Arguments   = "powershell.exe -Command `"irm '$rustdeskUrl' | iex`""
+        $link.WorkingDirectory = $env:USERPROFILE
         if (Test-Path $iconPath) { $link.IconLocation = "$iconPath,0" }
         $link.Description = "Assistenza Win Support"
         $link.Save()
@@ -1537,7 +1534,7 @@ function Invoke-WinStarterSetup {
         if (-not ($env:WT_SESSION) -and (Get-Command "wt.exe" -ErrorAction SilentlyContinue)) {
             Write-StyledMessage -Type Info -Text "Riavvio finale in Windows Terminal..."
             try {
-                $wtArgs = "-w 0 new-tab -p `"PowerShell`" -d . pwsh.exe -ExecutionPolicy Bypass -NoExit -Command `"Write-Host '✅ Ambiente Pronto. Configurazione Winstarter conclusa!' -ForegroundColor Green`""
+                $wtArgs = "-w 0 new-tab -p `"PowerShell`" -d . pwsh.exe -ExecutionPolicy Bypass -Command `"Write-Host '✅ Ambiente Pronto. Configurazione Winstarter conclusa!' -ForegroundColor Green`""
                 Start-Process -FilePath "wt.exe" -ArgumentList $wtArgs
                 exit
             }
@@ -1559,3 +1556,4 @@ function Invoke-WinStarterSetup {
 }
 
 Invoke-WinStarterSetup
+

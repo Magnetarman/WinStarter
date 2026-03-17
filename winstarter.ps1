@@ -24,7 +24,7 @@ $Global:MsgStyles = @{
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.1.11"
+        Version = "Version 1.2.0"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -658,16 +658,11 @@ function Install-WingetPackage {
             Write-StyledMessage -Type Warning -Text "Modulo WinGet Client: $($_.Exception.Message)"
         }
 
-        # Riparazione via modulo
+        # Riparazione via modulo (non bloccante su 0x80073D06)
         Write-StyledMessage -Type Info -Text "Tentativo riparazione Winget (Repair-WinGetPackageManager)..."
-        if (Get-Command Repair-WinGetPackageManager -ErrorAction SilentlyContinue) {
-            try {
-                Repair-WinGetPackageManager -Force -Latest 2>$null *>$null
-                Write-StyledMessage -Type Success -Text "Repair-WinGetPackageManager eseguito."
-            }
-            catch {
-                Write-StyledMessage -Type Warning -Text "Repair-WinGetPackageManager fallito: $($_.Exception.Message)"
-            }
+        $repairOk = Invoke-RepairWinGetPackageManagerSafe
+        if ($repairOk) {
+            Write-StyledMessage -Type Success -Text "Repair-WinGetPackageManager completato (o non necessario)."
             Start-Sleep 3
         }
 
@@ -736,23 +731,99 @@ function Install-PowerShellCore {
     .SYNOPSIS
     Installa la versione più recente (moderna) di PowerShell, essenziale per bypassare i vincoli della v5.1 legacy.
     #>
-    Write-StyledMessage -Type Info -Text "🔍 Verifica indipendenza su PowerShell 7..."
-    $ps7Path = $script:AppConfig.Paths.PowerShell7
-    
-    if (Test-Path $ps7Path) {
-        Write-StyledMessage -Type Success -Text "✅ Core PowerShell 7 già integrato."
+    Write-StyledMessage -Type Info -Text "🔍 Verifica PowerShell 7..."
+    $ps7Dir = $script:AppConfig.Paths.PowerShell7
+    $ps7Exe = Join-Path $ps7Dir "pwsh.exe"
+
+    if (Test-Path $ps7Exe) {
+        Write-StyledMessage -Type Success -Text "✅ PowerShell 7 già installato."
         return $true
     }
-    
+
+    # 1) Preferisci WinGet se disponibile
     if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-StyledMessage -Type Info -Text "⬇️ Bootstrap PowerShell 7 via terminale in corso..."
+        Write-StyledMessage -Type Info -Text "⬇️ Tentativo installazione PowerShell 7 via Winget..."
         $res = Invoke-WingetCommand -Arguments "install --id Microsoft.PowerShell --source winget --accept-source-agreements --accept-package-agreements --silent"
-        if ($res.ExitCode -eq 0 -or (Test-Path $ps7Path)) {
-            Write-StyledMessage -Type Success -Text "✅ PowerShell 7 convalidato e pronto."
+        Start-Sleep 3
+        if ($res.ExitCode -eq 0 -and (Test-Path $ps7Exe)) {
+            Write-StyledMessage -Type Success -Text "✅ PowerShell 7 installato via Winget."
             return $true
         }
+        if (Test-Path $ps7Exe) {
+            Write-StyledMessage -Type Success -Text "✅ PowerShell 7 installato (rilevato dopo Winget)."
+            return $true
+        }
+        Write-StyledMessage -Type Warning -Text "⚠️ Installazione via Winget non riuscita (ExitCode: $($res.ExitCode)). Fallback MSI..."
     }
-    return $false
+
+    # 2) Fallback: download MSI dalla release GitHub
+    try {
+        Write-StyledMessage -Type Info -Text "Recupero ultima release PowerShell..."
+        $release = Invoke-RestMethod -Uri $script:AppConfig.URLs.PowerShellRelease -UseBasicParsing
+
+        $asset = $release.assets | Where-Object { $_.name -like "*win-x64.msi" } | Select-Object -First 1
+        if (-not $asset) {
+            Write-StyledMessage -Type Error -Text "Asset PowerShell 7 win-x64.msi non trovato."
+            return $false
+        }
+
+        $tempDir = $script:AppConfig.Paths.Temp
+        if (-not (Test-Path $tempDir)) { $null = New-Item -Path $tempDir -ItemType Directory -Force }
+        $installerPath = Join-Path $tempDir $asset.name
+
+        Write-StyledMessage -Type Info -Text "Download installer..."
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installerPath -UseBasicParsing
+
+        Write-StyledMessage -Type Info -Text "Installazione PowerShell 7 in corso..."
+        $process = Start-Process -FilePath "msiexec.exe" -ArgumentList @(
+            "/i", "`"$installerPath`"",
+            "/norestart",
+            "/passive",
+            "ADD_EXPLORER_CONTEXT_MENU_OPENPOWERSHELL=1",
+            "ENABLE_PSREMOTING=1",
+            "REGISTER_MANIFEST=1"
+        ) -Wait -PassThru
+
+        $null = Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+        Start-Sleep 3
+
+        if ((Test-Path $ps7Exe) -or $process.ExitCode -eq 0) {
+            Write-StyledMessage -Type Success -Text "✅ PowerShell 7 installato con successo."
+            return $true
+        }
+
+        Write-StyledMessage -Type Error -Text "Installazione PowerShell 7 fallita. Codice: $($process.ExitCode)"
+        return $false
+    }
+    catch {
+        Write-StyledMessage -Type Error -Text "Errore installazione PowerShell: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Invoke-RepairWinGetPackageManagerSafe {
+    <#
+    .SYNOPSIS
+    Esegue Repair-WinGetPackageManager ma non fallisce quando il sistema ha già versioni più recenti delle dipendenze.
+    #>
+    if (-not (Get-Command Repair-WinGetPackageManager -ErrorAction SilentlyContinue)) {
+        return $false
+    }
+
+    try {
+        Repair-WinGetPackageManager -Force -Latest 2>$null *>$null
+        return $true
+    }
+    catch {
+        $msg = $_.Exception.Message
+        # 0x80073D06 = tentativo di installare versione precedente (già presente versione successiva)
+        if ($msg -match '0x80073D06' -or $msg -match 'versione successiva' -or $msg -match 'already installed a higher version') {
+            Write-StyledMessage -Type Info -Text "Repair-WinGetPackageManager: dipendenze già più aggiornate (0x80073D06). Proseguo senza bloccare."
+            return $true
+        }
+        Write-StyledMessage -Type Warning -Text "Repair-WinGetPackageManager fallito: $msg"
+        return $false
+    }
 }
 
 function Install-WindowsTerminalApp {
@@ -1143,7 +1214,7 @@ function Invoke-WinStarterSetup {
             Write-StyledMessage -Type Warning -Text "⚠️ Privilegi insufficienti. Riavvio dello script come Amministratore..."
             $procParams = @{
                 FilePath     = 'powershell'
-                ArgumentList = @( '-ExecutionPolicy', 'Bypass', '-NoProfile', '-Command', $scriptBlockForRelaunch )
+                ArgumentList = @( '-ExecutionPolicy', 'Bypass', '-NoProfile', '-Command', "`"$scriptBlockForRelaunch`"" )
                 Verb         = 'RunAs'
             }
             Start-Process @procParams
@@ -1174,7 +1245,7 @@ function Invoke-WinStarterSetup {
             $ps7Path = $script:AppConfig.Paths.PowerShell7
             $procParams = @{
                 FilePath     = Join-Path $ps7Path "pwsh.exe"
-                ArgumentList = @("-ExecutionPolicy", "Bypass", "-NoExit", "-Command", $scriptBlockForRelaunch)
+                ArgumentList = @("-ExecutionPolicy", "Bypass", "-NoExit", "-Command", "`"$scriptBlockForRelaunch`"")
                 Verb         = "RunAs"
             }
             Start-Process @procParams

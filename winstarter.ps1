@@ -22,34 +22,60 @@ $Global:MsgStyles = @{
 }
 
 # --- IMPOSTAZIONI WINDOWS UPDATE ---
-# Sospensione aggiornamenti per 4 ore (240 minuti) per evitare conflitti durante le operazioni
-$regPath = "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings"
-New-Item -Path $regPath -Force
-Set-ItemProperty -Path $regPath -Name "PauseUpdatesImpedanceMinutes" -Value 240  # 4 ore in minuti
-Set-ItemProperty -Path $regPath -Name "PausedFeatureUpdatesStartTime" -Value (Get-Date -Format "yyyyMMdd")  # Forza pausa Feature Updates di oggi
-Set-ItemProperty -Path $regPath -Name "PausedQualityUpdatesStartTime" -Value (Get-Date -Format "yyyyMMdd")  # Forza pausa Quality Updates di oggi
+# Sospensione aggiornamenti e protezione dai driver/riavvii forzati
+Write-Host "⚡ Configurazione impostazioni Windows Update (Driver, Deferral, No-Reboot)..." -ForegroundColor Cyan
+
+$regPathUX = "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings"
+if (-not (Test-Path $regPathUX)) { New-Item -Path $regPathUX -Force | Out-Null }
+Set-ItemProperty -Path $regPathUX -Name "PauseUpdatesImpedanceMinutes" -Value 240
+Set-ItemProperty -Path $regPathUX -Name "BranchReadinessLevel" -Type DWord -Value 20
+Set-ItemProperty -Path $regPathUX -Name "DeferFeatureUpdatesPeriodInDays" -Type DWord -Value 365
+Set-ItemProperty -Path $regPathUX -Name "DeferQualityUpdatesPeriodInDays" -Type DWord -Value 4
+Set-ItemProperty -Path $regPathUX -Name "PausedFeatureUpdatesStartTime" -Value (Get-Date -Format "yyyyMMdd")
+Set-ItemProperty -Path $regPathUX -Name "PausedQualityUpdatesStartTime" -Value (Get-Date -Format "yyyyMMdd")
+
+# Disabilitazione aggiornamenti driver
+$regPathMeta = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Device Metadata"
+if (-not (Test-Path $regPathMeta)) { New-Item -Path $regPathMeta -Force | Out-Null }
+Set-ItemProperty -Path $regPathMeta -Name "PreventDeviceMetadataFromNetwork" -Type DWord -Value 1
+
+$regPathDriver = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DriverSearching"
+if (-not (Test-Path $regPathDriver)) { New-Item -Path $regPathDriver -Force | Out-Null }
+Set-ItemProperty -Path $regPathDriver -Name "DontPromptForWindowsUpdate" -Type DWord -Value 1
+Set-ItemProperty -Path $regPathDriver -Name "DontSearchWindowsUpdate" -Type DWord -Value 1
+Set-ItemProperty -Path $regPathDriver -Name "DriverUpdateWizardWuSearchEnabled" -Type DWord -Value 0
+
+$regPathWU = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
+if (-not (Test-Path $regPathWU)) { New-Item -Path $regPathWU -Force | Out-Null }
+Set-ItemProperty -Path $regPathWU -Name "ExcludeWUDriversInQualityUpdate" -Type DWord -Value 1
+
+# Disabilitazione riavvio automatico
+$regPathAU = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
+if (-not (Test-Path $regPathAU)) { New-Item -Path $regPathAU -Force | Out-Null }
+Set-ItemProperty -Path $regPathAU -Name "NoAutoRebootWithLoggedOnUsers" -Type DWord -Value 1
+Set-ItemProperty -Path $regPathAU -Name "AUPowerManagement" -Type DWord -Value 0
+
+# Riavvio servizio Windows Update per applicare le modifiche
+Write-Host "🔄 Riavvio servizio Windows Update..." -ForegroundColor Cyan
+try { Restart-Service -Name wuauserv -Force -ErrorAction SilentlyContinue } catch {}
 
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.2.7"
+        Version = "Version 1.3.0"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
         NilesoftConfig          = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/NilesoftShell.zip"
-        WinSupportIcon          = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/img/WinSupport.ico"
         WingetMSIX              = "https://aka.ms/getwinget"
         PowerShellRelease       = "https://api.github.com/repos/PowerShell/PowerShell/releases/latest"
         OhMyPoshTheme           = "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/atomic.omp.json"
         PowerShellProfile       = "https://raw.githubusercontent.com/Magnetarman/WinToolkit/Dev/asset/Microsoft.PowerShell_profile.ps1"
         WindowsTerminalSettings = "https://raw.githubusercontent.com/Magnetarman/WinToolkit/Dev/asset/settings.json"
         TerminalRelease         = "https://api.github.com/repos/microsoft/terminal/releases/latest"
-        WinToolkitScript        = "https://raw.githubusercontent.com/Magnetarman/WinToolkit/Dev/WinToolkit.ps1"
-        WinToolkitIcon          = "https://raw.githubusercontent.com/Magnetarman/WinToolkit/refs/heads/main/img/WinToolkit.ico"
     }
     Paths    = @{
         Logs          = "$env:LOCALAPPDATA\WinStarter\logs"
-        WinToolkitDir = "$env:LOCALAPPDATA\WinToolkit"
         Temp          = "$env:TEMP\WinStarterSetup"
         PowerShell7   = "$env:ProgramFiles\PowerShell\7"
         Packages      = "$env:LOCALAPPDATA\Packages"
@@ -971,41 +997,7 @@ function Configure-PowerToysSettings {
     }
 }
 
-function SetRecommendedUpdate {
-    <#
-    .SYNOPSIS
-    Mitiga il comportamento aggressivo di Windows Update fermando l'inclusione di driver buggati e posticipando i Feature Update.
-    #>
-    Write-StyledMessage -Type Info -Text "⚡ Disabilitazione aggiornamenti driver tramite Windows Update..."
 
-    New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Device Metadata" -Force | Out-Null
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Device Metadata" -Name "PreventDeviceMetadataFromNetwork" -Type DWord -Value 1
-
-    New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DriverSearching" -Force | Out-Null
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DriverSearching" -Name "DontPromptForWindowsUpdate" -Type DWord -Value 1
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DriverSearching" -Name "DontSearchWindowsUpdate" -Type DWord -Value 1
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DriverSearching" -Name "DriverUpdateWizardWuSearchEnabled" -Type DWord -Value 0
-
-    New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Force | Out-Null
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "ExcludeWUDriversInQualityUpdate" -Type DWord -Value 1
-
-    Write-StyledMessage -Type Info -Text "⏱️ Posticipo Feature Updates di 365 giorni e Quality Updates di 4 giorni..."
-
-    New-Item -Path "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -Force | Out-Null
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -Name "BranchReadinessLevel" -Type DWord -Value 20
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -Name "DeferFeatureUpdatesPeriodInDays" -Type DWord -Value 365
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -Name "DeferQualityUpdatesPeriodInDays" -Type DWord -Value 4
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -Name "PausedFeatureUpdatesStartTime" -Value (Get-Date -Format "yyyyMMdd")  # Forza pausa Feature Updates di oggi
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -Name "PausedQualityUpdatesStartTime" -Value (Get-Date -Format "yyyyMMdd")  # Forza pausa Quality Updates di oggi
-
-    Write-StyledMessage -Type Info -Text "🛑 Disabilitazione riavvio automatico di Windows Update..."
-
-    New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Force | Out-Null
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Name "NoAutoRebootWithLoggedOnUsers" -Type DWord -Value 1
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Name "AUPowerManagement" -Type DWord -Value 0
-
-    Write-StyledMessage -Type Success -Text "✅ Impostazioni Windows Update raccomandate applicate con successo."
-}
 
 function Set-ExplorerPersonalization {
     <#
@@ -1393,92 +1385,7 @@ function Deploy-CustomAssets {
     Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-function Create-WinSupportShortcut {
-    <#
-    .SYNOPSIS
-    Realizza l'icona ed il collegamento per il Supporto Remoto via RustDesk per l'utente finale.
-    #>
-    Write-StyledMessage -Type Info -Text "🔗 Creazione scorciatoia desktop per l'assistenza remota (Win Support)..."
-    
-    try {
-        $desktop = $script:AppConfig.Paths.Desktop
-        $shortcut = Join-Path $desktop "Win Support.lnk"
-        $iconDir = $script:AppConfig.Paths.WinToolkitDir
-        $iconPath = Join-Path $iconDir "WinSupport.ico"
 
-        if (-not (Test-Path $iconDir)) { New-Item -Path $iconDir -ItemType Directory -Force | Out-Null }
-
-        if (-not (Test-Path $iconPath)) {
-            Invoke-WebRequest -Uri $script:AppConfig.URLs.WinSupportIcon -OutFile $iconPath -UseBasicParsing
-        }
-
-        # Collegamento che avvia Windows Terminal (wt.exe) con il payload RustDesk
-        $shell = New-Object -ComObject WScript.Shell
-        $link = $shell.CreateShortcut($shortcut)
-        $wtExe = $script:AppConfig.Paths.wtExe
-        if (-not (Test-Path $wtExe)) {
-            $wtCmd = Get-Command "wt.exe" -ErrorAction SilentlyContinue
-            if ($wtCmd -and $wtCmd.Source) { $wtExe = $wtCmd.Source }
-        }
-        $link.TargetPath = if ($wtExe) { $wtExe } else { "$env:LOCALAPPDATA\Microsoft\WindowsApps\wt.exe" }
-        $rustdeskUrl = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/SetRustDesk.ps1"
-        $link.Arguments = "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `"irm '$rustdeskUrl' | iex`""
-        $link.WorkingDirectory = $env:USERPROFILE
-        if (Test-Path $iconPath) { $link.IconLocation = "$iconPath,0" }
-        $link.Description = "Assistenza Win Support"
-        $link.Save()
-
-        Write-StyledMessage -Type Success -Text "✅ Collegamento 'Win Support' generato sul Desktop."
-    }
-    catch {
-        Write-StyledMessage -Type Error -Text "❌ Errore durante la creazione del collegamento Desktop: $($_.Exception.Message)"
-    }
-}
-
-function New-WinToolkitDesktopShortcut {
-    Write-StyledMessage -Type Info -Text "🧩 Creazione scorciatoia Desktop WinToolkit..."
-    try {
-        $desktop = $script:AppConfig.Paths.Desktop
-        $shortcut = Join-Path $desktop "Win Toolkit.lnk"
-
-        $iconDir = $script:AppConfig.Paths.WinToolkitDir
-        if (-not (Test-Path $iconDir)) { New-Item -Path $iconDir -ItemType Directory -Force | Out-Null }
-
-        $iconPath = Join-Path $iconDir "WinToolkit.ico"
-        if (-not (Test-Path $iconPath)) {
-            Invoke-WebRequest -Uri $script:AppConfig.URLs.WinToolkitIcon -OutFile $iconPath -UseBasicParsing
-        }
-
-        $shell = New-Object -ComObject WScript.Shell
-        $link = $shell.CreateShortcut($shortcut)
-        $wtExe = $script:AppConfig.Paths.wtExe
-        if (-not (Test-Path $wtExe)) {
-            $wtCmd = Get-Command "wt.exe" -ErrorAction SilentlyContinue
-            if ($wtCmd -and $wtCmd.Source) { $wtExe = $wtCmd.Source }
-        }
-        $link.TargetPath = if ($wtExe) { $wtExe } else { "$env:LOCALAPPDATA\Microsoft\WindowsApps\wt.exe" }
-        $toolkitUrl = $script:AppConfig.URLs.WinToolkitScript
-        # Utilizzo powershell.exe per compatibilità universale al boot del collegamento
-        $link.Arguments = "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `"irm '$toolkitUrl' | iex`""
-        $link.WorkingDirectory = $script:AppConfig.Paths.wtDir
-        if (Test-Path $iconPath) { $link.IconLocation = "$iconPath,0" }
-        $link.Description = "WinToolkit"
-        $link.Save()
-
-        # Abilita esecuzione come amministratore (bit flag del collegamento)
-        try {
-            $bytes = [IO.File]::ReadAllBytes($shortcut)
-            $bytes[21] = $bytes[21] -bor 32
-            [IO.File]::WriteAllBytes($shortcut, $bytes)
-        }
-        catch { }
-
-        Write-StyledMessage -Type Success -Text "✅ Collegamento 'Win Toolkit' generato sul Desktop."
-    }
-    catch {
-        Write-StyledMessage -Type Warning -Text "⚠️ Errore creazione scorciatoia WinToolkit: $($_.Exception.Message)"
-    }
-}
 
 
 # ============================================================================
@@ -1563,7 +1470,6 @@ function Invoke-WinStarterSetup {
         Install-PspEnvironment
 
         # Disinnesco Modifiche Sgradite (OS Baseline)
-        SetRecommendedUpdate
         Set-ExplorerPersonalization
         Invoke-AdvancedTweaks
         
@@ -1572,8 +1478,6 @@ function Invoke-WinStarterSetup {
         # Fase di Deploy Pacchetti e Asset Winstarter
         Install-RequiredApps
         Deploy-CustomAssets
-        New-WinToolkitDesktopShortcut
-        Create-WinSupportShortcut
 
         # Se siamo in terminal Host ma Windows Terminal è stato installato sposta l'utente la dentro alla fine
         if (-not ($env:WT_SESSION) -and (Get-Command "wt.exe" -ErrorAction SilentlyContinue)) {

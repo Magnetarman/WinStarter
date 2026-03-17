@@ -24,7 +24,7 @@ $Global:MsgStyles = @{
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.2.2"
+        Version = "Version 1.2.3"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -1082,6 +1082,10 @@ function Invoke-AdvancedTweaks {
             Write-StyledMessage -Type Warning -Text "⚠️ Impossibile disabilitare WSearch: $($_.Exception.Message)"
         }
 
+        # Salviamo la preferenza progressi per nascondere i messaggi Appx ("Avanzamento distribuzione")
+        $oldProgress = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+
         # Rimozione app Teams consumer (Microsoft.Teams.Free)
         Write-StyledMessage -Type Info -Text "🗑️ Rimozione Microsoft Teams (Free)..."
         try {
@@ -1135,6 +1139,9 @@ function Invoke-AdvancedTweaks {
         catch {
             Write-StyledMessage -Type Warning -Text "⚠️ Errore disabilitazione Copilot: $($_.Exception.Message)"
         }
+
+        # Ripristiniamo la preferenza progressi
+        $ProgressPreference = $oldProgress
 
         # Rimozione collegamenti Copilot da Taskbar / Start Menu (pin e shortcut)
         Write-StyledMessage -Type Info -Text "🧽 Rimozione collegamenti/pin Copilot (Taskbar/Start Menu)..."
@@ -1370,8 +1377,8 @@ function Create-WinSupportShortcut {
         }
         $link.TargetPath = $wtExe
         $rustdeskUrl = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/SetRustDesk.ps1"
-        # Stesso schema robusto usato dal collegamento WinToolkit in start.ps1
-        $link.Arguments = 'pwsh -NoProfile -ExecutionPolicy Bypass -Command "irm ' + $rustdeskUrl + ' | iex"'
+        # Escaping speciale per i comandi passati a wt.exe
+        $link.Arguments = "pwsh.exe -NoProfile -ExecutionPolicy Bypass -Command `"\"irm '$rustdeskUrl' | iex\"`""
         # La cartella di lavoro deve essere quella di WindowsApps,
         # così il campo "Da" del collegamento risulta corretto.
         $link.WorkingDirectory = $script:AppConfig.Paths.wtDir
@@ -1409,7 +1416,8 @@ function New-WinToolkitDesktopShortcut {
         }
         $link.TargetPath = $wtExe
         $toolkitUrl = $script:AppConfig.URLs.WinToolkitScript
-        $link.Arguments = "pwsh -NoProfile -ExecutionPolicy Bypass -Command `"irm $toolkitUrl | iex`""
+        # Escaping speciale per i comandi passati a wt.exe
+        $link.Arguments = "pwsh.exe -NoProfile -ExecutionPolicy Bypass -Command `"\"irm '$toolkitUrl' | iex\"`""
         $link.WorkingDirectory = $script:AppConfig.Paths.wtDir
         if (Test-Path $iconPath) { $link.IconLocation = "$iconPath,0" }
         $link.Description = "WinToolkit"

@@ -24,12 +24,12 @@ $Global:MsgStyles = @{
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.1.9"
+        Version = "Version 1.1.10"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
         NilesoftConfig          = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/NilesoftShell.zip"
-        WinSupportIcon          = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/img/WinSupport.png"
+        WinSupportIcon          = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/img/WinSupport.ico"
         WingetMSIX              = "https://aka.ms/getwinget"
         PowerShellRelease       = "https://api.github.com/repos/PowerShell/PowerShell/releases/latest"
         OhMyPoshTheme           = "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/atomic.omp.json"
@@ -1083,7 +1083,7 @@ function Create-WinSupportShortcut {
         $desktop = $script:AppConfig.Paths.Desktop
         $shortcut = Join-Path $desktop "Win Support.lnk"
         $iconDir = $script:AppConfig.Paths.WinToolkitDir
-        $icon = Join-Path $iconDir "WinSupport.png"
+        $icon = Join-Path $iconDir "WinSupport.ico"
         $iconIco = Join-Path $iconDir "WinSupport.ico"
 
         if (-not (Test-Path $iconDir)) { New-Item -Path $iconDir -ItemType Directory -Force | Out-Null }
@@ -1102,7 +1102,9 @@ function Create-WinSupportShortcut {
         # per essere robusti anche quando lo script è eseguito via `irm ... | iex`.
         $cmdString = "iex (irm '$rustdeskUrl')"
         $link.Arguments = "pwsh -ExecutionPolicy Bypass -Command '$cmdString'"
-        $link.WorkingDirectory = $script:AppConfig.Paths.WinToolkitDir
+        # La cartella di lavoro deve essere quella di WindowsApps,
+        # così il campo "Da" del collegamento risulta corretto.
+        $link.WorkingDirectory = $script:AppConfig.Paths.wtDir
         if (Test-Path $iconIco) { $link.IconLocation = "$iconIco,0" }
         $link.Description = "Assistenza Win Support"
         $link.Save()

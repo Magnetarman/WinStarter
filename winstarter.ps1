@@ -24,7 +24,7 @@ $Global:MsgStyles = @{
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.1.10"
+        Version = "Version 1.1.11"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -1133,12 +1133,17 @@ function Invoke-WinStarterSetup {
 
         Start-ToolkitLog "WinStarter"
 
+        # Quando lo script viene eseguito via `irm ... | iex`, $PSCommandPath è vuoto.
+        # Serve quindi una stringa di rilancio alternativa (relaunch) per UAC e switch a PS7.
+        $startUrl = 'https://magnetarman.com/winstarter'
+        $scriptBlockForRelaunch = if ($PSCommandPath) { "& '$PSCommandPath'" } else { "iex (irm '$startUrl')" }
+
         # Check UAC for Administrator Rights e Re-Esecuzione nativa se necessario
         if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
             Write-StyledMessage -Type Warning -Text "⚠️ Privilegi insufficienti. Riavvio dello script come Amministratore..."
             $procParams = @{
                 FilePath     = 'powershell'
-                ArgumentList = @( '-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', "`"$PSCommandPath`"" )
+                ArgumentList = @( '-ExecutionPolicy', 'Bypass', '-NoProfile', '-Command', $scriptBlockForRelaunch )
                 Verb         = 'RunAs'
             }
             Start-Process @procParams
@@ -1169,7 +1174,7 @@ function Invoke-WinStarterSetup {
             $ps7Path = $script:AppConfig.Paths.PowerShell7
             $procParams = @{
                 FilePath     = Join-Path $ps7Path "pwsh.exe"
-                ArgumentList = @("-ExecutionPolicy", "Bypass", "-NoExit", "-File", "`"$PSCommandPath`"")
+                ArgumentList = @("-ExecutionPolicy", "Bypass", "-NoExit", "-Command", $scriptBlockForRelaunch)
                 Verb         = "RunAs"
             }
             Start-Process @procParams

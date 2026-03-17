@@ -21,10 +21,16 @@ $Global:MsgStyles = @{
     Progress = @{ Icon = '🔄'; Color = 'Magenta' }
 }
 
+# --- IMPOSTAZIONI WINDOWS UPDATE ---
+# Sospensione aggiornamenti per 4 ore (240 minuti) per evitare conflitti durante le operazioni
+$regPath = "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings"
+New-Item -Path $regPath -Force
+Set-ItemProperty -Path $regPath -Name "PauseUpdatesImpedanceMinutes" -Value 240  # 4 ore in minuti
+
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.2.4"
+        Version = "Version 1.2.5"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -1375,9 +1381,9 @@ function Create-WinSupportShortcut {
             $wtCmd = Get-Command "wt.exe" -ErrorAction SilentlyContinue
             if ($wtCmd -and $wtCmd.Source) { $wtExe = $wtCmd.Source }
         }
-        $link.TargetPath  = if ($wtExe) { $wtExe } else { 'wt.exe' }
+        $link.TargetPath = if ($wtExe) { $wtExe } else { "$env:LOCALAPPDATA\Microsoft\WindowsApps\wt.exe" }
         $rustdeskUrl = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/SetRustDesk.ps1"
-        $link.Arguments   = "powershell.exe -Command `"irm '$rustdeskUrl' | iex`""
+        $link.Arguments = "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `"irm '$rustdeskUrl' | iex`""
         $link.WorkingDirectory = $env:USERPROFILE
         if (Test-Path $iconPath) { $link.IconLocation = "$iconPath,0" }
         $link.Description = "Assistenza Win Support"
@@ -1411,10 +1417,10 @@ function New-WinToolkitDesktopShortcut {
             $wtCmd = Get-Command "wt.exe" -ErrorAction SilentlyContinue
             if ($wtCmd -and $wtCmd.Source) { $wtExe = $wtCmd.Source }
         }
-        $link.TargetPath = $wtExe
+        $link.TargetPath = if ($wtExe) { $wtExe } else { "$env:LOCALAPPDATA\Microsoft\WindowsApps\wt.exe" }
         $toolkitUrl = $script:AppConfig.URLs.WinToolkitScript
-        # Escaping pulito per i comandi passati a wt.exe o powershell.exe
-        $link.Arguments = "pwsh.exe -NoProfile -ExecutionPolicy Bypass -Command `"irm '$toolkitUrl' | iex`""
+        # Utilizzo powershell.exe per compatibilità universale al boot del collegamento
+        $link.Arguments = "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `"irm '$toolkitUrl' | iex`""
         $link.WorkingDirectory = $script:AppConfig.Paths.wtDir
         if (Test-Path $iconPath) { $link.IconLocation = "$iconPath,0" }
         $link.Description = "WinToolkit"

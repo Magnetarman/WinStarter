@@ -24,7 +24,7 @@ $Global:MsgStyles = @{
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.2.0"
+        Version = "Version 1.2.1"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -1046,6 +1046,77 @@ function Invoke-AdvancedTweaks {
 
         Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "ShowCopilotButton" -Value 0 -Type DWord
 
+        # Disabilitazione completa Windows Search (per evitare interferenze con Everything)
+        Write-StyledMessage -Type Info -Text "🛑 Disabilitazione servizio Windows Search (WSearch)..."
+        try {
+            $svc = Get-Service -Name 'WSearch' -ErrorAction SilentlyContinue
+            if ($svc) {
+                try { Stop-Service -Name 'WSearch' -Force -ErrorAction SilentlyContinue } catch { }
+                try { Set-Service -Name 'WSearch' -StartupType Disabled -ErrorAction SilentlyContinue } catch { }
+                Write-StyledMessage -Type Success -Text "✅ Windows Search disabilitato."
+            }
+            else {
+                Write-StyledMessage -Type Info -Text "Windows Search non presente (WSearch)."
+            }
+        }
+        catch {
+            Write-StyledMessage -Type Warning -Text "⚠️ Impossibile disabilitare WSearch: $($_.Exception.Message)"
+        }
+
+        # Rimozione app Teams consumer (Microsoft.Teams.Free)
+        Write-StyledMessage -Type Info -Text "🗑️ Rimozione Microsoft Teams (Free)..."
+        try {
+            $teamsNames = @('Microsoft.Teams.Free', 'MicrosoftTeams')
+
+            foreach ($n in $teamsNames) {
+                Get-AppxPackage -Name $n -AllUsers -ErrorAction SilentlyContinue | ForEach-Object {
+                    try { Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue } catch { }
+                }
+                Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -eq $n } | ForEach-Object {
+                    try { Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue | Out-Null } catch { }
+                }
+            }
+            Write-StyledMessage -Type Success -Text "✅ Teams Free rimosso (se presente)."
+        }
+        catch {
+            Write-StyledMessage -Type Warning -Text "⚠️ Errore rimozione Teams Free: $($_.Exception.Message)"
+        }
+
+        # Disabilitazione/rimozione app Copilot + task collegati
+        Write-StyledMessage -Type Info -Text "🧹 Disabilitazione app e componenti Copilot..."
+        try {
+            # Rimuovi pacchetti AppX Copilot per utente/i e provisioning
+            $copilotNamePatterns = @(
+                'Microsoft.Copilot',
+                '*Copilot*'
+            )
+
+            foreach ($pat in $copilotNamePatterns) {
+                Get-AppxPackage -AllUsers -Name $pat -ErrorAction SilentlyContinue | ForEach-Object {
+                    try { Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue } catch { }
+                }
+            }
+
+            Get-AppxProvisionedPackage -Online |
+            Where-Object { $_.DisplayName -like '*Copilot*' } |
+            ForEach-Object {
+                try { Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue | Out-Null } catch { }
+            }
+
+            # Disabilita eventuali scheduled task Copilot (se presenti)
+            try {
+                Get-ScheduledTask -ErrorAction SilentlyContinue |
+                Where-Object { $_.TaskName -match 'Copilot' -or $_.TaskPath -match 'Copilot' } |
+                ForEach-Object { try { Disable-ScheduledTask -TaskName $_.TaskName -TaskPath $_.TaskPath -ErrorAction SilentlyContinue | Out-Null } catch { } }
+            }
+            catch { }
+
+            Write-StyledMessage -Type Success -Text "✅ Copilot disabilitato/rimosso (dove applicabile)."
+        }
+        catch {
+            Write-StyledMessage -Type Warning -Text "⚠️ Errore disabilitazione Copilot: $($_.Exception.Message)"
+        }
+
         # Estirpazione pulita del demone OneDrive
         Write-StyledMessage -Type Info -Text "🗑️ Disinstallazione profonda di Microsoft OneDrive in corso..."
         try {
@@ -1063,6 +1134,62 @@ function Invoke-AdvancedTweaks {
     }
     catch {
         Write-StyledMessage -Type Warning -Text "⚠️ Errore durante i tweak avanzati: $($_.Exception.Message)"
+    }
+}
+
+function Remove-DesktopShortcutsIfPresent {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$ShortcutNames
+    )
+    $pathsToCheck = @(
+        [Environment]::GetFolderPath('Desktop'),
+        [Environment]::GetFolderPath('CommonDesktopDirectory')
+    ) | Select-Object -Unique
+
+    foreach ($base in $pathsToCheck) {
+        foreach ($name in $ShortcutNames) {
+            $lnk = Join-Path $base $name
+            if (Test-Path $lnk) {
+                try {
+                    Remove-Item -Path $lnk -Force -ErrorAction SilentlyContinue
+                    Write-StyledMessage -Type Info -Text "🧽 Rimosso collegamento Desktop: $name"
+                }
+                catch { }
+            }
+        }
+    }
+}
+
+function Restart-ExplorerSafe {
+    Write-StyledMessage -Type Info -Text "🔄 Riavvio affidabile di Explorer.exe..."
+    try {
+        Get-Process -Name explorer -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+
+        $started = $false
+        try {
+            Start-Process -FilePath "explorer.exe" -ErrorAction Stop | Out-Null
+            $started = $true
+        }
+        catch { }
+
+        if (-not $started) {
+            try { Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "start", "explorer.exe" -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null } catch { }
+        }
+
+        $deadline = (Get-Date).AddSeconds(8)
+        while ((Get-Date) -lt $deadline) {
+            if (Get-Process -Name explorer -ErrorAction SilentlyContinue) {
+                Write-StyledMessage -Type Success -Text "✅ Explorer.exe riavviato correttamente."
+                return
+            }
+            Start-Sleep -Milliseconds 400
+        }
+        Write-StyledMessage -Type Warning -Text "⚠️ Explorer.exe non risulta attivo dopo il riavvio. Potrebbe avviarsi a breve."
+    }
+    catch {
+        Write-StyledMessage -Type Warning -Text "⚠️ Errore riavvio Explorer.exe: $($_.Exception.Message)"
     }
 }
 
@@ -1085,6 +1212,13 @@ function Install-RequiredApps {
             $process = Start-Process -FilePath winget -ArgumentList "install --id $($app.Id) --silent --accept-package-agreements --accept-source-agreements" -Wait -NoNewWindow -PassThru
             if ($process.ExitCode -eq 0 -or $process.ExitCode -eq -1978335215) {
                 Write-StyledMessage -Type Success -Text "✅ $($app.Name) installato o già presente nel sistema."
+                # Ripulisci il Desktop dai collegamenti creati automaticamente
+                if ($app.Id -eq 'voidtools.Everything') {
+                    Remove-DesktopShortcutsIfPresent -ShortcutNames @('Everything.lnk')
+                }
+                elseif ($app.Id -eq 'MartiCliment.UniGetUI') {
+                    Remove-DesktopShortcutsIfPresent -ShortcutNames @('UniGetUI.lnk', 'WingetUI.lnk', 'WinGetUI.lnk')
+                }
             }
             else {
                 Write-StyledMessage -Type Warning -Text "⚠️ Installazione di $($app.Name) fallita (ExitCode: $($process.ExitCode))."
@@ -1154,14 +1288,12 @@ function Create-WinSupportShortcut {
         $desktop = $script:AppConfig.Paths.Desktop
         $shortcut = Join-Path $desktop "Win Support.lnk"
         $iconDir = $script:AppConfig.Paths.WinToolkitDir
-        $icon = Join-Path $iconDir "WinSupport.ico"
-        $iconIco = Join-Path $iconDir "WinSupport.ico"
+        $iconPath = Join-Path $iconDir "WinSupport.ico"
 
         if (-not (Test-Path $iconDir)) { New-Item -Path $iconDir -ItemType Directory -Force | Out-Null }
 
-        if (-not (Test-Path $icon)) {
-            Invoke-WebRequest -Uri $script:AppConfig.URLs.WinSupportIcon -OutFile $icon -UseBasicParsing
-            Copy-Item $icon -Destination $iconIco -Force
+        if (-not (Test-Path $iconPath)) {
+            Invoke-WebRequest -Uri $script:AppConfig.URLs.WinSupportIcon -OutFile $iconPath -UseBasicParsing
         }
 
         # Genera Shortcut programmatica al file wt.exe eseguendo il payload
@@ -1176,7 +1308,7 @@ function Create-WinSupportShortcut {
         # La cartella di lavoro deve essere quella di WindowsApps,
         # così il campo "Da" del collegamento risulta corretto.
         $link.WorkingDirectory = $script:AppConfig.Paths.wtDir
-        if (Test-Path $iconIco) { $link.IconLocation = "$iconIco,0" }
+        if (Test-Path $iconPath) { $link.IconLocation = "$iconPath,0" }
         $link.Description = "Assistenza Win Support"
         $link.Save()
 
@@ -1271,9 +1403,7 @@ function Invoke-WinStarterSetup {
         Set-ExplorerPersonalization
         Invoke-AdvancedTweaks
         
-        Write-StyledMessage -Type Info -Text "🔄 Riavvio processo Explorer.exe per rendere effettive le modifiche UI..."
-        Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
-        Start-Sleep 2
+        Restart-ExplorerSafe
 
         # Fase di Deploy Pacchetti e Asset Winstarter
         Install-RequiredApps

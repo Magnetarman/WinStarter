@@ -26,11 +26,13 @@ $Global:MsgStyles = @{
 $regPath = "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings"
 New-Item -Path $regPath -Force
 Set-ItemProperty -Path $regPath -Name "PauseUpdatesImpedanceMinutes" -Value 240  # 4 ore in minuti
+Set-ItemProperty -Path $regPath -Name "PausedFeatureUpdatesStartTime" -Value (Get-Date -Format "yyyyMMdd")  # Forza pausa Feature Updates di oggi
+Set-ItemProperty -Path $regPath -Name "PausedQualityUpdatesStartTime" -Value (Get-Date -Format "yyyyMMdd")  # Forza pausa Quality Updates di oggi
 
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.2.6"
+        Version = "Version 1.2.7"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -974,7 +976,7 @@ function SetRecommendedUpdate {
     .SYNOPSIS
     Mitiga il comportamento aggressivo di Windows Update fermando l'inclusione di driver buggati e posticipando i Feature Update.
     #>
-    Write-StyledMessage -Type Info -Text "⚙️ Disabilitazione aggiornamenti driver tramite Windows Update..."
+    Write-StyledMessage -Type Info -Text "⚡ Disabilitazione aggiornamenti driver tramite Windows Update..."
 
     New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Device Metadata" -Force | Out-Null
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Device Metadata" -Name "PreventDeviceMetadataFromNetwork" -Type DWord -Value 1
@@ -993,6 +995,8 @@ function SetRecommendedUpdate {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -Name "BranchReadinessLevel" -Type DWord -Value 20
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -Name "DeferFeatureUpdatesPeriodInDays" -Type DWord -Value 365
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -Name "DeferQualityUpdatesPeriodInDays" -Type DWord -Value 4
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -Name "PausedFeatureUpdatesStartTime" -Value (Get-Date -Format "yyyyMMdd")  # Forza pausa Feature Updates di oggi
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -Name "PausedQualityUpdatesStartTime" -Value (Get-Date -Format "yyyyMMdd")  # Forza pausa Quality Updates di oggi
 
     Write-StyledMessage -Type Info -Text "🛑 Disabilitazione riavvio automatico di Windows Update..."
 

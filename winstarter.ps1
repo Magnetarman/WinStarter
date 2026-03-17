@@ -53,12 +53,9 @@ Write-Host "⚡ Configurazione impostazioni Windows Update (Driver, Deferral, No
 
 $regPathUX = "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings"
 if (-not (Test-Path $regPathUX)) { New-Item -Path $regPathUX -Force | Out-Null }
-Set-ItemProperty -Path $regPathUX -Name "PauseUpdatesImpedanceMinutes" -Value 240
 Set-ItemProperty -Path $regPathUX -Name "BranchReadinessLevel" -Type DWord -Value 20
 Set-ItemProperty -Path $regPathUX -Name "DeferFeatureUpdatesPeriodInDays" -Type DWord -Value 365
 Set-ItemProperty -Path $regPathUX -Name "DeferQualityUpdatesPeriodInDays" -Type DWord -Value 4
-Set-ItemProperty -Path $regPathUX -Name "PausedFeatureUpdatesStartTime" -Value (Get-Date -Format "yyyyMMdd")
-Set-ItemProperty -Path $regPathUX -Name "PausedQualityUpdatesStartTime" -Value (Get-Date -Format "yyyyMMdd")
 
 # Disabilitazione aggiornamenti driver
 $regPathMeta = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Device Metadata"
@@ -88,7 +85,7 @@ try { Restart-Service -Name wuauserv -Force -ErrorAction SilentlyContinue } catc
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.3.2"
+        Version = "Version 1.3.3"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -242,7 +239,6 @@ function Start-TaskManagerEarly {
     }
     catch { }
 }
-
 
 # ============================================================================
 # UTILITIES WINGET E PERMESSI
@@ -800,7 +796,6 @@ function Install-WingetPackage {
     }
 }
 
-
 # ============================================================================
 # INSTALLAZIONE COMPONENTI (Powershell 7, Terminal, PSP)
 # ============================================================================
@@ -988,9 +983,6 @@ function Install-PspEnvironment {
 # FUNZIONI CORE WINSTARTER
 # ============================================================================
 
-
-
-
 function Set-ExplorerPersonalization {
     <#
     .SYNOPSIS
@@ -1004,14 +996,22 @@ function Set-ExplorerPersonalization {
         Set-ItemProperty -Path $explorerAdv -Name "HideFileExt" -Value 0 -Type DWord
         Set-ItemProperty -Path $explorerAdv -Name "UseCompactMode" -Value 1 -Type DWord
         Set-ItemProperty -Path $explorerAdv -Name "AutoCheckSelect" -Value 0 -Type DWord
-        Set-ItemProperty -Path $explorerAdv -Name "ShowCompColor" -Value 1 -Type DWord
-        Set-ItemProperty -Path $explorerAdv -Name "IconsOnly" -Value 0 -Type DWord
-        Set-ItemProperty -Path $explorerAdv -Name "ShowRecent" -Value 0 -Type DWord
-        Set-ItemProperty -Path $explorerAdv -Name "ShowFrequent" -Value 0 -Type DWord
-        Set-ItemProperty -Path $explorerAdv -Name "Start_TrackDocs" -Value 0 -Type DWord
-        Set-ItemProperty -Path $explorerAdv -Name "LaunchTo" -Value 1 -Type DWord
         Set-ItemProperty -Path $explorerAdv -Name "ShowInfoTip" -Value 1 -Type DWord
         Set-ItemProperty -Path $explorerAdv -Name "ShowTaskViewButton" -Value 1 -Type DWord
+        Set-ItemProperty -Path $explorerAdv -Name "ShowSyncProviderNotifications" -Value 0 -Type DWord
+        Set-ItemProperty -Path $explorerAdv -Name "ShowCompColor" -Value 1 -Type DWord
+
+        # Opzioni cartella => Generale => Privacy (Mostra file/cartelle recenti/frequenti)
+        $explorerBase = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer"
+        Set-ItemProperty -Path $explorerBase -Name "ShowRecent" -Value 0 -Type DWord
+        Set-ItemProperty -Path $explorerBase -Name "ShowFrequent" -Value 0 -Type DWord
+
+        # Proprietà disco C:// => Comprimi unità per risparmiare spazio su disco
+        Write-StyledMessage -Type Info -Text "💾 Attivazione compressione su disco C: (potrebbe richiedere tempo)..."
+        try {
+            # Applica l'attributo di compressione alla radice e ai file esistenti in modo non bloccante/silenzioso
+            Start-Process -FilePath "compact.exe" -ArgumentList "/c", "/i", "C:\" -WindowStyle Hidden -Wait
+        } catch { }
 
         # Bing Search Remove
         $bingSearch = "HKCU:\Software\Policies\Microsoft\Windows\Explorer"
@@ -1404,9 +1404,6 @@ function Install-PowerToysExperience {
     Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-
-
-
 # ============================================================================
 # AVVIO PRINCIPALE E GESTIONE TRANSIZIONI
 # ============================================================================
@@ -1541,4 +1538,3 @@ function Invoke-WinStarterSetup {
 }
 
 Invoke-WinStarterSetup
-

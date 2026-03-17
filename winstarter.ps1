@@ -24,7 +24,7 @@ $Global:MsgStyles = @{
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.1.6"
+        Version = "Version 1.1.7"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -1097,7 +1097,8 @@ function Create-WinSupportShortcut {
         $shell = New-Object -ComObject WScript.Shell
         $link = $shell.CreateShortcut($shortcut)
         $link.TargetPath = $script:AppConfig.Paths.wtExe
-        $link.Arguments = 'pwsh -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/RustDesk/SetRustDesk.ps1 | iex"'
+        $rustdeskUrl = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/SetRustDesk.ps1"
+        $link.Arguments = 'pwsh -ExecutionPolicy Bypass -Command "irm ' + $rustdeskUrl + ' | iex"'
         $link.WorkingDirectory = $script:AppConfig.Paths.WinToolkitDir
         if (Test-Path $iconIco) { $link.IconLocation = "$iconIco,0" }
         $link.Description = "Assistenza Win Support"

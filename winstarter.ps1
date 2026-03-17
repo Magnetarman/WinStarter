@@ -21,29 +21,71 @@ $Global:MsgStyles = @{
     Progress = @{ Icon = '🔄'; Color = 'Magenta' }
 }
 
-# ============================================================================
-# CHECK UAC — INIZIO ASSOLUTO (Prima di qualsiasi inizializzazione)
-# Spostato qui per evitare di avviare log, variabili e ottimizzazioni di rete
-# inutilmente se lo script deve essere rilanciato con privilegi elevati.
-# ============================================================================
-$script:StartUrl               = 'https://magnetarman.com/winstarter'
-$script:ScriptBlockForRelaunch = if ($PSCommandPath) { "& '$PSCommandPath'" } else { "iex (irm '$script:StartUrl')" }
+# --- BLOCCO TEMPORANEO CONNESSIONE A CONSUMO E RETE PRIVATA ---
+# Impedisce a Windows Update di scaricare aggiornamenti e ottimizza la connettività
+Write-Host "🌐 Ottimizzazione rete per blocco temporaneo aggiornamenti..." -ForegroundColor Cyan
+$activeProfile = Get-NetConnectionProfile | Where-Object { $_.IPv4Connectivity -eq 'Internet' -or $_.IPv6Connectivity -eq 'Internet' }
 
-if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host "⚠️ Privilegi insufficienti. Riavvio dello script come Amministratore..." -ForegroundColor Yellow
-    $procParams = @{
-        FilePath     = 'powershell'
-        ArgumentList = @( '-ExecutionPolicy', 'Bypass', '-NoProfile', '-Command', "`"$script:ScriptBlockForRelaunch`"" )
-        Verb         = 'RunAs'
+if ($activeProfile) {
+    $networkName = $activeProfile.Name
+    $interfaceIndex = $activeProfile.InterfaceIndex
+    $Global:OriginalNetworkCategory = $activeProfile.NetworkCategory
+    $regPathMetered = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles\$($activeProfile.InstanceGuid)"
+
+    try {
+        # Cambia il profilo in Privato per evitare blocchi firewall/discovery
+        Set-NetConnectionProfile -InterfaceIndex $interfaceIndex -NetworkCategory Private
+        Write-Host "✅ Rete '$networkName' impostata come PRIVATA." -ForegroundColor Green
+
+        # Imposta Connessione a Consumo (Metered) via registro
+        Set-ItemProperty -Path $regPathMetered -Name "Cost" -Value 2 -ErrorAction Stop
+        Write-Host "✅ Connessione a consumo ATTIVATA per '$networkName'." -ForegroundColor Green
+    } catch {
+        Write-Host "⚠️ Errore durante l'ottimizzazione rete: $($_.Exception.Message)" -ForegroundColor Yellow
     }
-    Start-Process @procParams
-    exit
+} else {
+    Write-Host "⚠️ Nessuna connessione attiva a Internet trovata per l'ottimizzazione." -ForegroundColor Yellow
 }
+
+# --- IMPOSTAZIONI WINDOWS UPDATE ---
+# Sospensione aggiornamenti e protezione dai driver/riavvii forzati
+Write-Host "⚡ Configurazione impostazioni Windows Update (Driver, Deferral, No-Reboot)..." -ForegroundColor Cyan
+
+$regPathUX = "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings"
+if (-not (Test-Path $regPathUX)) { New-Item -Path $regPathUX -Force | Out-Null }
+Set-ItemProperty -Path $regPathUX -Name "BranchReadinessLevel" -Type DWord -Value 20
+Set-ItemProperty -Path $regPathUX -Name "DeferFeatureUpdatesPeriodInDays" -Type DWord -Value 365
+Set-ItemProperty -Path $regPathUX -Name "DeferQualityUpdatesPeriodInDays" -Type DWord -Value 4
+
+# Disabilitazione aggiornamenti driver
+$regPathMeta = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Device Metadata"
+if (-not (Test-Path $regPathMeta)) { New-Item -Path $regPathMeta -Force | Out-Null }
+Set-ItemProperty -Path $regPathMeta -Name "PreventDeviceMetadataFromNetwork" -Type DWord -Value 1
+
+$regPathDriver = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DriverSearching"
+if (-not (Test-Path $regPathDriver)) { New-Item -Path $regPathDriver -Force | Out-Null }
+Set-ItemProperty -Path $regPathDriver -Name "DontPromptForWindowsUpdate" -Type DWord -Value 1
+Set-ItemProperty -Path $regPathDriver -Name "DontSearchWindowsUpdate" -Type DWord -Value 1
+Set-ItemProperty -Path $regPathDriver -Name "DriverUpdateWizardWuSearchEnabled" -Type DWord -Value 0
+
+$regPathWU = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
+if (-not (Test-Path $regPathWU)) { New-Item -Path $regPathWU -Force | Out-Null }
+Set-ItemProperty -Path $regPathWU -Name "ExcludeWUDriversInQualityUpdate" -Type DWord -Value 1
+
+# Disabilitazione riavvio automatico
+$regPathAU = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
+if (-not (Test-Path $regPathAU)) { New-Item -Path $regPathAU -Force | Out-Null }
+Set-ItemProperty -Path $regPathAU -Name "NoAutoRebootWithLoggedOnUsers" -Type DWord -Value 1
+Set-ItemProperty -Path $regPathAU -Name "AUPowerManagement" -Type DWord -Value 0
+
+# Riavvio servizio Windows Update per applicare le modifiche
+Write-Host "🔄 Riavvio servizio Windows Update..." -ForegroundColor Cyan
+try { Restart-Service -Name wuauserv -Force -ErrorAction SilentlyContinue } catch {}
 
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.3.7"
+        Version = "Version 1.3.6"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -938,86 +980,6 @@ function Install-PspEnvironment {
 }
 
 # ============================================================================
-# OTTIMIZZAZIONE RETE E WINDOWS UPDATE
-# Incapsula la configurazione temporanea della rete (connessione a consumo,
-# categoria Privata) e le policy di sospensione Windows Update.
-# Gestisce correttamente $Global:OriginalNetworkCategory per il ripristino finale.
-# ============================================================================
-
-function Set-NetworkOptimization {
-    <#
-    .SYNOPSIS
-    Imposta temporaneamente la connessione come "a consumo" e blocca Windows Update
-    per prevenire interferenze durante il setup. Salva la categoria originale per
-    il ripristino al termine di Invoke-WinStarterSetup.
-    #>
-
-    # --- BLOCCO TEMPORANEO CONNESSIONE A CONSUMO E RETE PRIVATA ---
-    Write-StyledMessage -Type Info -Text "🌐 Ottimizzazione rete per blocco temporaneo aggiornamenti..."
-    $activeProfile = Get-NetConnectionProfile | Where-Object { $_.IPv4Connectivity -eq 'Internet' -or $_.IPv6Connectivity -eq 'Internet' }
-
-    if ($activeProfile) {
-        $networkName    = $activeProfile.Name
-        $interfaceIndex = $activeProfile.InterfaceIndex
-        $Global:OriginalNetworkCategory = $activeProfile.NetworkCategory
-        $regPathMetered = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles\$($activeProfile.InstanceGuid)"
-
-        try {
-            # Cambia il profilo in Privato per evitare blocchi firewall/discovery
-            Set-NetConnectionProfile -InterfaceIndex $interfaceIndex -NetworkCategory Private
-            Write-StyledMessage -Type Success -Text "✅ Rete '$networkName' impostata come PRIVATA."
-
-            # Imposta Connessione a Consumo (Metered) via registro
-            Set-ItemProperty -Path $regPathMetered -Name "Cost" -Value 2 -ErrorAction Stop
-            Write-StyledMessage -Type Success -Text "✅ Connessione a consumo ATTIVATA per '$networkName'."
-        }
-        catch {
-            Write-StyledMessage -Type Warning -Text "⚠️ Errore durante l'ottimizzazione rete: $($_.Exception.Message)"
-        }
-    }
-    else {
-        Write-StyledMessage -Type Warning -Text "⚠️ Nessuna connessione attiva a Internet trovata per l'ottimizzazione."
-    }
-
-    # --- IMPOSTAZIONI WINDOWS UPDATE ---
-    # Sospensione aggiornamenti e protezione dai driver/riavvii forzati
-    Write-StyledMessage -Type Info -Text "⚡ Configurazione impostazioni Windows Update (Driver, Deferral, No-Reboot)..."
-
-    $regPathUX = "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings"
-    if (-not (Test-Path $regPathUX)) { New-Item -Path $regPathUX -Force | Out-Null }
-    Set-ItemProperty -Path $regPathUX -Name "BranchReadinessLevel" -Type DWord -Value 20
-    Set-ItemProperty -Path $regPathUX -Name "DeferFeatureUpdatesPeriodInDays" -Type DWord -Value 365
-    Set-ItemProperty -Path $regPathUX -Name "DeferQualityUpdatesPeriodInDays" -Type DWord -Value 4
-
-    # Disabilitazione aggiornamenti driver
-    $regPathMeta = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Device Metadata"
-    if (-not (Test-Path $regPathMeta)) { New-Item -Path $regPathMeta -Force | Out-Null }
-    Set-ItemProperty -Path $regPathMeta -Name "PreventDeviceMetadataFromNetwork" -Type DWord -Value 1
-
-    $regPathDriver = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DriverSearching"
-    if (-not (Test-Path $regPathDriver)) { New-Item -Path $regPathDriver -Force | Out-Null }
-    Set-ItemProperty -Path $regPathDriver -Name "DontPromptForWindowsUpdate" -Type DWord -Value 1
-    Set-ItemProperty -Path $regPathDriver -Name "DontSearchWindowsUpdate" -Type DWord -Value 1
-    Set-ItemProperty -Path $regPathDriver -Name "DriverUpdateWizardWuSearchEnabled" -Type DWord -Value 0
-
-    $regPathWU = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
-    if (-not (Test-Path $regPathWU)) { New-Item -Path $regPathWU -Force | Out-Null }
-    Set-ItemProperty -Path $regPathWU -Name "ExcludeWUDriversInQualityUpdate" -Type DWord -Value 1
-
-    # Disabilitazione riavvio automatico
-    $regPathAU = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
-    if (-not (Test-Path $regPathAU)) { New-Item -Path $regPathAU -Force | Out-Null }
-    Set-ItemProperty -Path $regPathAU -Name "NoAutoRebootWithLoggedOnUsers" -Type DWord -Value 1
-    Set-ItemProperty -Path $regPathAU -Name "AUPowerManagement" -Type DWord -Value 0
-
-    # Riavvio servizio Windows Update per applicare le modifiche
-    Write-StyledMessage -Type Info -Text "🔄 Riavvio servizio Windows Update..."
-    try { Restart-Service -Name wuauserv -Force -ErrorAction SilentlyContinue } catch {}
-
-    Write-StyledMessage -Type Success -Text "✅ Ottimizzazione rete e policy Windows Update applicate."
-}
-
-# ============================================================================
 # FUNZIONI CORE WINSTARTER
 # ============================================================================
 
@@ -1091,94 +1053,10 @@ function Set-ExplorerPersonalization {
     }
 }
 
-# ============================================================================
-# RIMOZIONE BLOATWARE (Teams e Copilot)
-# Funzione dedicata estratta da Invoke-AdvancedTweaks per essere eseguita
-# prima della transizione a PS7, quando i permessi e i tool sono già pronti
-# e le app non hanno ancora avuto modo di "ripararsi" durante il cambio sessione.
-# ============================================================================
-
-function Remove-SystemBloat {
-    <#
-    .SYNOPSIS
-    Rimuove Microsoft Teams (Free) e Windows Copilot a livello di AppxPackage
-    (utente e provisioning), disabilita i Scheduled Task collegati e rimuove
-    tutti i collegamenti/pin da Taskbar e Start Menu.
-    #>
-    Write-StyledMessage -Type Info -Text "🧹 Avvio rimozione bloatware di sistema (Teams + Copilot)..."
-
-    $oldProgress = $ProgressPreference
-    $ProgressPreference = 'SilentlyContinue'
-
-    # --- MICROSOFT TEAMS (FREE) ---
-    Write-StyledMessage -Type Info -Text "Sto eseguendo: Rimozione Microsoft Teams (Free)..."
-    try {
-        $teamsNames = @('Microsoft.Teams.Free', 'MicrosoftTeams')
-
-        foreach ($n in $teamsNames) {
-            Get-AppxPackage -Name $n -AllUsers -ErrorAction SilentlyContinue | ForEach-Object {
-                Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue *>$null
-            }
-            Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -eq $n } | ForEach-Object {
-                Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue *>$null
-            }
-        }
-
-        # Disabilita Scheduled Task Teams
-        Get-ScheduledTask -ErrorAction SilentlyContinue |
-        Where-Object { $_.TaskName -match 'Teams' -or $_.TaskPath -match 'Teams' } |
-        ForEach-Object { Disable-ScheduledTask -TaskName $_.TaskName -TaskPath $_.TaskPath -ErrorAction SilentlyContinue | Out-Null }
-
-        # Rimozione collegamenti Teams da Taskbar / Start Menu
-        Remove-ShortcutsByNamePattern -NamePatterns @('*Teams*') -AlsoRemoveFromTaskbarPins
-
-        Write-StyledMessage -Type Success -Text "✅ Fatto: Rimozione Microsoft Teams completata."
-    }
-    catch {
-        Write-StyledMessage -Type Warning -Text "⚠️ Errore rimozione Teams: $($_.Exception.Message)"
-    }
-
-    # --- WINDOWS COPILOT ---
-    Write-StyledMessage -Type Info -Text "Sto eseguendo: Disabilitazione app e componenti Copilot..."
-    try {
-        # Rimuovi pacchetti AppX Copilot per utente/i e provisioning
-        $copilotNamePatterns = @('Microsoft.Copilot', '*Copilot*')
-
-        foreach ($pat in $copilotNamePatterns) {
-            Get-AppxPackage -AllUsers -Name $pat -ErrorAction SilentlyContinue | ForEach-Object {
-                Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue *>$null
-            }
-        }
-
-        Get-AppxProvisionedPackage -Online |
-        Where-Object { $_.DisplayName -like '*Copilot*' } |
-        ForEach-Object {
-            Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue *>$null
-        }
-
-        # Disabilita Scheduled Task Copilot
-        Get-ScheduledTask -ErrorAction SilentlyContinue |
-        Where-Object { $_.TaskName -match 'Copilot' -or $_.TaskPath -match 'Copilot' } |
-        ForEach-Object { Disable-ScheduledTask -TaskName $_.TaskName -TaskPath $_.TaskPath -ErrorAction SilentlyContinue | Out-Null }
-
-        # Rimozione collegamenti Copilot da Taskbar / Start Menu
-        Remove-ShortcutsByNamePattern -NamePatterns @('*Copilot*') -AlsoRemoveFromTaskbarPins
-
-        Write-StyledMessage -Type Success -Text "✅ Fatto: Disabilitazione componenti Copilot completata."
-    }
-    catch {
-        Write-StyledMessage -Type Warning -Text "⚠️ Errore disabilitazione Copilot: $($_.Exception.Message)"
-    }
-
-    $ProgressPreference = $oldProgress
-    Write-StyledMessage -Type Success -Text "✅ Rimozione bloatware completata. Sistema pulito prima della transizione PS7."
-}
-
 function Invoke-AdvancedTweaks {
     <#
     .SYNOPSIS
     Blocchi Registry duri contro telemetria, OneDrive, Edge e imposizione menu click destro classico.
-    NB: La rimozione di Teams e Copilot è stata estratta in Remove-SystemBloat (eseguita prima).
     #>
     Write-StyledMessage -Type Info -Text "🛠️ Esecuzione tweak avanzati di sistema (Copilot, IPv4, Menu Classico)..."
     try {
@@ -1210,8 +1088,7 @@ function Invoke-AdvancedTweaks {
         Set-ItemProperty -Path $edgePol -Name "UserFeedbackAllowed" -Value 0 -Type DWord
         Set-ItemProperty -Path $edgePol -Name "ConfigureDoNotTrack" -Value 1 -Type DWord
 
-        # Disabilitazione di Windows Copilot a basso livello (chiavi registro — la rimozione AppX
-        # è già avvenuta in Remove-SystemBloat prima della transizione PS7)
+        # Disabilitazione di Windows Copilot a basso livello
         $winCopilot = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot"
         if (-not (Test-Path $winCopilot)) { New-Item -Path $winCopilot -Force | Out-Null }
         Set-ItemProperty -Path $winCopilot -Name "TurnOffWindowsCopilot" -Value 1 -Type DWord
@@ -1237,6 +1114,80 @@ function Invoke-AdvancedTweaks {
         }
         catch {
             Write-StyledMessage -Type Warning -Text "⚠️ Impossibile disabilitare WSearch: $($_.Exception.Message)"
+        }
+
+        # Salviamo la preferenza progressi per nascondere i messaggi Appx ("Avanzamento distribuzione")
+        $oldProgress = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+
+        # Rimozione app Teams consumer (Microsoft.Teams.Free)
+        $oldProgress = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        Write-StyledMessage -Type Info -Text "Sto eseguendo: Rimozione Microsoft Teams (Free)..."
+        try {
+            $teamsNames = @('Microsoft.Teams.Free', 'MicrosoftTeams')
+
+            foreach ($n in $teamsNames) {
+                Get-AppxPackage -Name $n -AllUsers -ErrorAction SilentlyContinue | ForEach-Object {
+                    Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue *>$null
+                }
+                Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -eq $n } | ForEach-Object {
+                    Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue *>$null
+                }
+            }
+            Write-StyledMessage -Type Success -Text "Fatto: Rimozione Microsoft Teams."
+        }
+        catch {
+            Write-StyledMessage -Type Warning -Text "Errore rimozione Teams Free: $($_.Exception.Message)"
+        }
+        $ProgressPreference = $oldProgress
+
+        # Disabilitazione/rimozione app Copilot + task collegati
+        $oldProgress = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        Write-StyledMessage -Type Info -Text "Sto eseguendo: Disabilitazione app e componenti Copilot..."
+        try {
+            # Rimuovi pacchetti AppX Copilot per utente/i e provisioning
+            $copilotNamePatterns = @(
+                'Microsoft.Copilot',
+                '*Copilot*'
+            )
+
+            foreach ($pat in $copilotNamePatterns) {
+                Get-AppxPackage -AllUsers -Name $pat -ErrorAction SilentlyContinue | ForEach-Object {
+                    Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue *>$null
+                }
+            }
+
+            Get-AppxProvisionedPackage -Online |
+            Where-Object { $_.DisplayName -like '*Copilot*' } |
+            ForEach-Object {
+                Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue *>$null
+            }
+
+            # Disabilita eventuali scheduled task Copilot (se presenti)
+            Get-ScheduledTask -ErrorAction SilentlyContinue |
+            Where-Object { $_.TaskName -match 'Copilot' -or $_.TaskPath -match 'Copilot' } |
+            ForEach-Object { Disable-ScheduledTask -TaskName $_.TaskName -TaskPath $_.TaskPath -ErrorAction SilentlyContinue | Out-Null }
+
+            Write-StyledMessage -Type Success -Text "Fatto: Disabilitazione componenti Copilot."
+        }
+        catch {
+            Write-StyledMessage -Type Warning -Text "Errore disabilitazione Copilot: $($_.Exception.Message)"
+        }
+        $ProgressPreference = $oldProgress
+
+        # Ripristiniamo la preferenza progressi
+        $ProgressPreference = $oldProgress
+
+        # Rimozione collegamenti Copilot da Taskbar / Start Menu (pin e shortcut)
+        Write-StyledMessage -Type Info -Text "🧽 Rimozione collegamenti/pin Copilot (Taskbar/Start Menu)..."
+        try {
+            Remove-ShortcutsByNamePattern -NamePatterns @('*Copilot*') -AlsoRemoveFromTaskbarPins
+            Write-StyledMessage -Type Success -Text "✅ Collegamenti Copilot rimossi dove trovati."
+        }
+        catch {
+            Write-StyledMessage -Type Warning -Text "⚠️ Errore rimozione collegamenti Copilot: $($_.Exception.Message)"
         }
 
         # Estirpazione pulita del demone OneDrive
@@ -1462,61 +1413,6 @@ function Install-PowerToysExperience {
 }
 
 # ============================================================================
-# ROUTINE DI RIAVVIO FINALE
-# Applica un countdown interattivo da 30 secondi prima del reboot.
-# Permette all'utente di annullare premendo 'C'. Il riavvio è necessario
-# per "sigillare" le modifiche al registro (menu contestuale classico,
-# disabilitazione Search, ecc.) che diventano pienamente effettive solo
-# dopo il ricaricamento del kernel/profilo utente.
-# ============================================================================
-
-function Invoke-FinalReboot {
-    <#
-    .SYNOPSIS
-    Countdown interattivo da 30 secondi seguito da Restart-Computer -Force.
-    Premi 'C' durante il conto alla rovescia per annullare il riavvio.
-    #>
-    Write-StyledMessage -Type Info -Text "🔄 Il sistema verrà riavviato per applicare tutte le modifiche al registro."
-    Write-Host ""
-    Write-Host "  Premi [C] per annullare il riavvio." -ForegroundColor Yellow
-    Write-Host ""
-
-    $cancelReboot = $false
-
-    for ($i = 30; $i -ge 0; $i--) {
-        # Stampa il countdown sovrascrivendo la riga corrente
-        Write-Host "`r  ⏳ Riavvio in: $i secondi...   " -NoNewline -ForegroundColor Cyan
-
-        # Polling keypresscon finestra di 1 secondo (10 slot da 100ms)
-        $slotDeadline = (Get-Date).AddSeconds(1)
-        while ((Get-Date) -lt $slotDeadline) {
-            if ([Console]::KeyAvailable) {
-                $key = [Console]::ReadKey($true)
-                if ($key.KeyChar -eq 'c' -or $key.KeyChar -eq 'C') {
-                    $cancelReboot = $true
-                    break
-                }
-            }
-            Start-Sleep -Milliseconds 100
-        }
-
-        if ($cancelReboot) { break }
-    }
-
-    # Riga vuota dopo il countdown per non sovrascrivere il messaggio successivo
-    Write-Host ""
-
-    if ($cancelReboot) {
-        Write-StyledMessage -Type Warning -Text "⚠️ Riavvio annullato dall'utente. Alcune modifiche al registro potrebbero richiedere un riavvio manuale per diventare effettive."
-    }
-    else {
-        Write-StyledMessage -Type Info -Text "🔄 Countdown completato. Esecuzione riavvio sistema in corso..."
-        Write-ToolkitLog -Level 'INFO' -Message "Riavvio sistema avviato da Invoke-FinalReboot."
-        Restart-Computer -Force
-    }
-}
-
-# ============================================================================
 # AVVIO PRINCIPALE E GESTIONE TRANSIZIONI
 # ============================================================================
 
@@ -1533,19 +1429,26 @@ function Invoke-WinStarterSetup {
         Start-ToolkitLog "WinStarter"
 
         # Quando lo script viene eseguito via `irm ... | iex`, $PSCommandPath è vuoto.
-        # Il blocco di rilancio è già stato calcolato a livello globale ($script:ScriptBlockForRelaunch).
-        # Il check UAC è già avvenuto all'inizio assoluto dello script.
+        # Serve quindi una stringa di rilancio alternativa (relaunch) per UAC e switch a PS7.
+        $startUrl = 'https://magnetarman.com/winstarter'
+        $scriptBlockForRelaunch = if ($PSCommandPath) { "& '$PSCommandPath'" } else { "iex (irm '$startUrl')" }
+
+        # Check UAC for Administrator Rights e Re-Esecuzione nativa se necessario
+        if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            Write-StyledMessage -Type Warning -Text "⚠️ Privilegi insufficienti. Riavvio dello script come Amministratore..."
+            $procParams = @{
+                FilePath     = 'powershell'
+                ArgumentList = @( '-ExecutionPolicy', 'Bypass', '-NoProfile', '-Command', "`"$scriptBlockForRelaunch`"" )
+                Verb         = 'RunAs'
+            }
+            Start-Process @procParams
+            exit
+        }
 
         # Prima operazione all'avvio (utile per test visivo)
         Start-TaskManagerEarly
 
         Show-Header -Title $script:AppConfig.Header.Title -Version $script:AppConfig.Header.Version
-
-        # Ottimizzazione rete: connessione a consumo + blocco Windows Update
-        # Eseguita subito dopo il log per proteggere il download dei pacchetti da
-        # interferenze di WU. La variabile $Global:OriginalNetworkCategory viene
-        # salvata qui per il ripristino finale.
-        Set-NetworkOptimization
 
         # Logica Primaria Pre-Transizione
         if (-not $isResumeSetup) {
@@ -1559,12 +1462,6 @@ function Invoke-WinStarterSetup {
                 Update-EnvironmentPath
             }
             Test-WingetDeepValidation | Out-Null
-
-            # Rimozione bloatware PRIMA della transizione a PS7: Teams e Copilot vengono
-            # sradicati con Winget già operativo e prima che il cambio di sessione del
-            # terminale dia loro la possibilità di avviare processi di auto-riparazione.
-            Remove-SystemBloat
-
             Install-PowerShellCore | Out-Null
         }
 
@@ -1575,7 +1472,7 @@ function Invoke-WinStarterSetup {
             $ps7Path = $script:AppConfig.Paths.PowerShell7
             $procParams = @{
                 FilePath     = Join-Path $ps7Path "pwsh.exe"
-                ArgumentList = @("-ExecutionPolicy", "Bypass", "-NoExit", "-Command", "`"$script:ScriptBlockForRelaunch`"")
+                ArgumentList = @("-ExecutionPolicy", "Bypass", "-NoExit", "-Command", "`"$scriptBlockForRelaunch`"")
                 Verb         = "RunAs"
             }
             Start-Process @procParams
@@ -1619,7 +1516,7 @@ function Invoke-WinStarterSetup {
         Write-StyledMessage -Type Success -Text "🎉 Configurazione Win Starter conclusa brillantemente! Il sistema è pronto."
 
         # --- RIPRISTINO CONNESSIONE ILLIMITATA E CATEGORIA ORIGINALE ---
-        Write-StyledMessage -Type Info -Text "🌐 Ripristino connettività standard..."
+        Write-Host "🌐 Ripristino connettività standard..." -ForegroundColor Cyan
         $activeProfile = Get-NetConnectionProfile | Where-Object { $_.IPv4Connectivity -eq 'Internet' -or $_.IPv6Connectivity -eq 'Internet' }
         if ($activeProfile) {
             $interfaceIndex = $activeProfile.InterfaceIndex
@@ -1631,32 +1528,17 @@ function Invoke-WinStarterSetup {
                 }
                 # Ripristina il costo illimitato
                 Set-ItemProperty -Path $regPathMetered -Name "Cost" -Value 1 -ErrorAction Stop
-                Write-StyledMessage -Type Success -Text "✅ Connettività e categoria di rete ripristinate."
+                Write-Host "✅ Connettività e categoria di rete ripristinate." -ForegroundColor Green
             } catch { }
         }
 
-        # --- RIAVVIO FINALE ---
-        # Il reboot "sigilla" le modifiche al registro che richiedono il ricaricamento
-        # del kernel per diventare pienamente effettive (menu click destro classico,
-        # disabilitazione WSearch, policy Copilot, ecc.).
-        Invoke-FinalReboot
-
+        Write-Host "Premi un tasto per uscire..."
+        $null = [Console]::ReadKey($true)
         exit 0
     }
     catch {
         Write-StyledMessage -Type Error -Text "❌ Errore critico irreversibile nel setup: $($_.Exception.Message)"
         Write-ToolkitLog -Level 'ERROR' -Message "ECCEZIONE UNHANDLED: $($_.Exception.Message) `n $($_.ScriptStackTrace)"
-
-        # Tentativo di ripristino rete anche in caso di errore critico
-        try {
-            $activeProfile = Get-NetConnectionProfile | Where-Object { $_.IPv4Connectivity -eq 'Internet' -or $_.IPv6Connectivity -eq 'Internet' }
-            if ($activeProfile -and $Global:OriginalNetworkCategory) {
-                Set-NetConnectionProfile -InterfaceIndex $activeProfile.InterfaceIndex -NetworkCategory $Global:OriginalNetworkCategory
-                $regPathMetered = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles\$($activeProfile.InstanceGuid)"
-                Set-ItemProperty -Path $regPathMetered -Name "Cost" -Value 1 -ErrorAction SilentlyContinue
-            }
-        } catch { }
-
         Write-Host "Premi un tasto per uscire..."
         $null = [Console]::ReadKey($true)
         exit 1

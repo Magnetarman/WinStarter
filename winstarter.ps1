@@ -85,7 +85,7 @@ try { Restart-Service -Name wuauserv -Force -ErrorAction SilentlyContinue } catc
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.3.3"
+        Version = "Version 1.3.4"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -988,29 +988,34 @@ function Set-ExplorerPersonalization {
     .SYNOPSIS
     Pulisce Explorer: mostra le info estese sui file, imposta il dark mode e nasconde la pubblicità (Bing) nel menu Start.
     #>
-    Write-StyledMessage -Type Info -Text "⚙️ Applicazione personalizzazioni File Explorer in corso..."
+    Write-StyledMessage -Type Info -Text "⚙️ Applicazione personalizzazioni File Explorer (in corso)..."
     try {
+        # Chiude Explorer per garantire che le chiavi di registro non vengano sovrascritte alla chiusura
+        Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+
         $explorerAdv = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
+        if (-not (Test-Path $explorerAdv)) { New-Item -Path $explorerAdv -Force | Out-Null }
         
-        Set-ItemProperty -Path $explorerAdv -Name "Hidden" -Value 1 -Type DWord
-        Set-ItemProperty -Path $explorerAdv -Name "HideFileExt" -Value 0 -Type DWord
-        Set-ItemProperty -Path $explorerAdv -Name "UseCompactMode" -Value 1 -Type DWord
-        Set-ItemProperty -Path $explorerAdv -Name "AutoCheckSelect" -Value 0 -Type DWord
-        Set-ItemProperty -Path $explorerAdv -Name "ShowInfoTip" -Value 1 -Type DWord
-        Set-ItemProperty -Path $explorerAdv -Name "ShowTaskViewButton" -Value 1 -Type DWord
-        Set-ItemProperty -Path $explorerAdv -Name "ShowSyncProviderNotifications" -Value 0 -Type DWord
-        Set-ItemProperty -Path $explorerAdv -Name "ShowCompColor" -Value 1 -Type DWord
+        Set-ItemProperty -Path $explorerAdv -Name "Hidden" -Value 1 -Type DWord -Force
+        Set-ItemProperty -Path $explorerAdv -Name "HideFileExt" -Value 0 -Type DWord -Force
+        Set-ItemProperty -Path $explorerAdv -Name "UseCompactMode" -Value 1 -Type DWord -Force
+        Set-ItemProperty -Path $explorerAdv -Name "AutoCheckSelect" -Value 0 -Type DWord -Force
+        Set-ItemProperty -Path $explorerAdv -Name "ShowInfoTip" -Value 1 -Type DWord -Force
+        Set-ItemProperty -Path $explorerAdv -Name "ShowTaskViewButton" -Value 1 -Type DWord -Force
+        Set-ItemProperty -Path $explorerAdv -Name "ShowSyncProviderNotifications" -Value 0 -Type DWord -Force
+        Set-ItemProperty -Path $explorerAdv -Name "ShowCompColor" -Value 1 -Type DWord -Force
 
         # Opzioni cartella => Generale => Privacy (Mostra file/cartelle recenti/frequenti)
         $explorerBase = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer"
-        Set-ItemProperty -Path $explorerBase -Name "ShowRecent" -Value 0 -Type DWord
-        Set-ItemProperty -Path $explorerBase -Name "ShowFrequent" -Value 0 -Type DWord
+        Set-ItemProperty -Path $explorerBase -Name "ShowRecent" -Value 0 -Type DWord -Force
+        Set-ItemProperty -Path $explorerBase -Name "ShowFrequent" -Value 0 -Type DWord -Force
 
         # Proprietà disco C:// => Comprimi unità per risparmiare spazio su disco
-        Write-StyledMessage -Type Info -Text "💾 Attivazione compressione su disco C: (potrebbe richiedere tempo)..."
+        Write-StyledMessage -Type Info -Text "💾 Attivazione compressione ricorsiva su disco C: (incluso file nascosti/sistema)..."
         try {
-            # Applica l'attributo di compressione alla radice e ai file esistenti in modo non bloccante/silenzioso
-            Start-Process -FilePath "compact.exe" -ArgumentList "/c", "/i", "C:\" -WindowStyle Hidden -Wait
+            # /c: compress, /s: recursive, /i: ignore errors, /q: quiet, /a: hidden/system
+            Start-Process -FilePath "compact.exe" -ArgumentList "/c", "/s:C:\", "/i", "/q", "/a" -WindowStyle Hidden
         } catch { }
 
         # Bing Search Remove
@@ -1498,7 +1503,7 @@ function Invoke-WinStarterSetup {
         if (-not ($env:WT_SESSION) -and (Get-Command "wt.exe" -ErrorAction SilentlyContinue)) {
             Write-StyledMessage -Type Info -Text "Riavvio finale in Windows Terminal..."
             try {
-                $wtArgs = "-w 0 new-tab -p `"PowerShell`" -d . pwsh.exe -ExecutionPolicy Bypass -Command `"Write-Host '✅ Ambiente Pronto. Configurazione Winstarter conclusa!' -ForegroundColor Green`""
+                $wtArgs = "-w 0 new-tab -p `"PowerShell`" -d . pwsh.exe -NoExit -ExecutionPolicy Bypass -Command `"Write-Host '✅ Ambiente Pronto. Configurazione Winstarter conclusa!' -ForegroundColor Green`""
                 Start-Process -FilePath "wt.exe" -ArgumentList $wtArgs
                 exit
             }

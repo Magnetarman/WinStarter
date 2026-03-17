@@ -8,7 +8,7 @@
 
 <p>
 	<img src="https://img.shields.io/github/license/Magnetarman/WinStarter?style=for-the-badge&logo=opensourceinitiative&logoColor=white&color=0080ff" alt="license">
-	<img src="https://img.shields.io/badge/version-1.3.4-green.svg?style=for-the-badge" alt="versione">
+	<img src="https://img.shields.io/badge/version-1.3.5-green.svg?style=for-the-badge" alt="versione">
 	<img src="https://img.shields.io/github/last-commit/Magnetarman/WinStarter?style=for-the-badge&logo=git&logoColor=white&color=9370DB" alt="last-commit">
 </p>
 
@@ -54,8 +54,6 @@ irm https://magnetarman.com/winstarter | iex
 ## 🐛 Bug Noti - Fix in corso…
 
 - Barre di progressione non correttamente soppresse nell'output
-- PowerToys avvia lo splash screen generale, dovrebbe avviarsi ridotto ad icona senza splash screen
-- Disabilitazione delle notifiche di PowerToys nelle notifiche di windows
 
 ---
 

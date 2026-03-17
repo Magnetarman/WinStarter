@@ -24,7 +24,7 @@ $Global:MsgStyles = @{
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.2.1"
+        Version = "Version 1.2.2"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -36,6 +36,8 @@ $script:AppConfig = @{
         PowerShellProfile       = "https://raw.githubusercontent.com/Magnetarman/WinToolkit/Dev/asset/Microsoft.PowerShell_profile.ps1"
         WindowsTerminalSettings = "https://raw.githubusercontent.com/Magnetarman/WinToolkit/Dev/asset/settings.json"
         TerminalRelease         = "https://api.github.com/repos/microsoft/terminal/releases/latest"
+        WinToolkitScript        = "https://raw.githubusercontent.com/Magnetarman/WinToolkit/Dev/WinToolkit.ps1"
+        WinToolkitIcon          = "https://raw.githubusercontent.com/Magnetarman/WinToolkit/refs/heads/main/img/WinToolkit.ico"
     }
     Paths    = @{
         Logs          = "$env:LOCALAPPDATA\WinStarter\logs"
@@ -162,6 +164,23 @@ function Write-ToolkitLog {
     $clean = $Message -replace '^\s+', ''
     $line = "[$ts] [$Level] $clean"
     try { Add-Content -Path $Global:CurrentLogFile -Value $line -Encoding UTF8 -ErrorAction SilentlyContinue } catch {}
+}
+
+# ============================================================================
+# EARLY-START (debug visivo)
+# ============================================================================
+
+function Start-TaskManagerEarly {
+    <#
+    .SYNOPSIS
+    Avvia Task Manager come prima operazione (una sola volta).
+    #>
+    try {
+        if ($env:WINSTARTER_TASKMGR_STARTED -eq '1') { return }
+        $env:WINSTARTER_TASKMGR_STARTED = '1'
+        Start-Process -FilePath "taskmgr.exe" -ErrorAction SilentlyContinue | Out-Null
+    }
+    catch { }
 }
 
 
@@ -1117,6 +1136,16 @@ function Invoke-AdvancedTweaks {
             Write-StyledMessage -Type Warning -Text "⚠️ Errore disabilitazione Copilot: $($_.Exception.Message)"
         }
 
+        # Rimozione collegamenti Copilot da Taskbar / Start Menu (pin e shortcut)
+        Write-StyledMessage -Type Info -Text "🧽 Rimozione collegamenti/pin Copilot (Taskbar/Start Menu)..."
+        try {
+            Remove-ShortcutsByNamePattern -NamePatterns @('*Copilot*') -AlsoRemoveFromTaskbarPins
+            Write-StyledMessage -Type Success -Text "✅ Collegamenti Copilot rimossi dove trovati."
+        }
+        catch {
+            Write-StyledMessage -Type Warning -Text "⚠️ Errore rimozione collegamenti Copilot: $($_.Exception.Message)"
+        }
+
         # Estirpazione pulita del demone OneDrive
         Write-StyledMessage -Type Info -Text "🗑️ Disinstallazione profonda di Microsoft OneDrive in corso..."
         try {
@@ -1156,6 +1185,41 @@ function Remove-DesktopShortcutsIfPresent {
                     Write-StyledMessage -Type Info -Text "🧽 Rimosso collegamento Desktop: $name"
                 }
                 catch { }
+            }
+        }
+    }
+}
+
+function Remove-ShortcutsByNamePattern {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$NamePatterns,
+        [switch]$AlsoRemoveFromTaskbarPins
+    )
+
+    $locations = @(
+        # Start Menu (User + ProgramData)
+        [Environment]::GetFolderPath('StartMenu'),
+        [Environment]::GetFolderPath('CommonStartMenu'),
+        # Desktop (User + Public)
+        [Environment]::GetFolderPath('Desktop'),
+        [Environment]::GetFolderPath('CommonDesktopDirectory')
+    ) | Select-Object -Unique
+
+    if ($AlsoRemoveFromTaskbarPins) {
+        $taskbarPins = Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar'
+        $locations += $taskbarPins
+    }
+
+    foreach ($loc in ($locations | Select-Object -Unique)) {
+        if (-not $loc) { continue }
+        if (-not (Test-Path $loc)) { continue }
+
+        foreach ($pat in $NamePatterns) {
+            Get-ChildItem -Path $loc -Recurse -Force -Filter '*.lnk' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like $pat } |
+            ForEach-Object {
+                try { Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue } catch { }
             }
         }
     }
@@ -1299,12 +1363,15 @@ function Create-WinSupportShortcut {
         # Genera Shortcut programmatica al file wt.exe eseguendo il payload
         $shell = New-Object -ComObject WScript.Shell
         $link = $shell.CreateShortcut($shortcut)
-        $link.TargetPath = $script:AppConfig.Paths.wtExe
+        $wtExe = $script:AppConfig.Paths.wtExe
+        if (-not (Test-Path $wtExe)) {
+            $wtCmd = Get-Command "wt.exe" -ErrorAction SilentlyContinue
+            if ($wtCmd -and $wtCmd.Source) { $wtExe = $wtCmd.Source }
+        }
+        $link.TargetPath = $wtExe
         $rustdeskUrl = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/SetRustDesk.ps1"
-        # Costruiamo un comando semplice, senza virgolette annidate complicate,
-        # per essere robusti anche quando lo script è eseguito via `irm ... | iex`.
-        $cmdString = "iex (irm '$rustdeskUrl')"
-        $link.Arguments = "pwsh -ExecutionPolicy Bypass -Command '$cmdString'"
+        # Stesso schema robusto usato dal collegamento WinToolkit in start.ps1
+        $link.Arguments = 'pwsh -NoProfile -ExecutionPolicy Bypass -Command "irm ' + $rustdeskUrl + ' | iex"'
         # La cartella di lavoro deve essere quella di WindowsApps,
         # così il campo "Da" del collegamento risulta corretto.
         $link.WorkingDirectory = $script:AppConfig.Paths.wtDir
@@ -1316,6 +1383,50 @@ function Create-WinSupportShortcut {
     }
     catch {
         Write-StyledMessage -Type Error -Text "❌ Errore durante la creazione del collegamento Desktop: $($_.Exception.Message)"
+    }
+}
+
+function New-WinToolkitDesktopShortcut {
+    Write-StyledMessage -Type Info -Text "🧩 Creazione scorciatoia Desktop WinToolkit..."
+    try {
+        $desktop = $script:AppConfig.Paths.Desktop
+        $shortcut = Join-Path $desktop "Win Toolkit.lnk"
+
+        $iconDir = $script:AppConfig.Paths.WinToolkitDir
+        if (-not (Test-Path $iconDir)) { New-Item -Path $iconDir -ItemType Directory -Force | Out-Null }
+
+        $iconPath = Join-Path $iconDir "WinToolkit.ico"
+        if (-not (Test-Path $iconPath)) {
+            Invoke-WebRequest -Uri $script:AppConfig.URLs.WinToolkitIcon -OutFile $iconPath -UseBasicParsing
+        }
+
+        $shell = New-Object -ComObject WScript.Shell
+        $link = $shell.CreateShortcut($shortcut)
+        $wtExe = $script:AppConfig.Paths.wtExe
+        if (-not (Test-Path $wtExe)) {
+            $wtCmd = Get-Command "wt.exe" -ErrorAction SilentlyContinue
+            if ($wtCmd -and $wtCmd.Source) { $wtExe = $wtCmd.Source }
+        }
+        $link.TargetPath = $wtExe
+        $toolkitUrl = $script:AppConfig.URLs.WinToolkitScript
+        $link.Arguments = "pwsh -NoProfile -ExecutionPolicy Bypass -Command `"irm $toolkitUrl | iex`""
+        $link.WorkingDirectory = $script:AppConfig.Paths.wtDir
+        if (Test-Path $iconPath) { $link.IconLocation = "$iconPath,0" }
+        $link.Description = "WinToolkit"
+        $link.Save()
+
+        # Abilita esecuzione come amministratore (bit flag del collegamento)
+        try {
+            $bytes = [IO.File]::ReadAllBytes($shortcut)
+            $bytes[21] = $bytes[21] -bor 32
+            [IO.File]::WriteAllBytes($shortcut, $bytes)
+        }
+        catch { }
+
+        Write-StyledMessage -Type Success -Text "✅ Collegamento 'Win Toolkit' generato sul Desktop."
+    }
+    catch {
+        Write-StyledMessage -Type Warning -Text "⚠️ Errore creazione scorciatoia WinToolkit: $($_.Exception.Message)"
     }
 }
 
@@ -1352,6 +1463,9 @@ function Invoke-WinStarterSetup {
             Start-Process @procParams
             exit
         }
+
+        # Prima operazione all'avvio (utile per test visivo)
+        Start-TaskManagerEarly
 
         Show-Header -Title $script:AppConfig.Header.Title -Version $script:AppConfig.Header.Version
 
@@ -1408,6 +1522,7 @@ function Invoke-WinStarterSetup {
         # Fase di Deploy Pacchetti e Asset Winstarter
         Install-RequiredApps
         Deploy-CustomAssets
+        New-WinToolkitDesktopShortcut
         Create-WinSupportShortcut
 
         # Se siamo in terminal Host ma Windows Terminal è stato installato sposta l'utente la dentro alla fine

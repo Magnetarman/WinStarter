@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Script di inizio che installa e configura Win Starter.
 .DESCRIPTION
@@ -24,7 +24,7 @@ $Global:MsgStyles = @{
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.1.0"
+        Version = "Version 1.1.5"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -366,47 +366,359 @@ function Repair-WingetDatabase {
     }
 }
 
-function Test-WingetDeepValidation {
+function Find-WinGet {
     <#
     .SYNOPSIS
-    Imita l'attività di un utente reale per dedurre se la comunicazione remota coi repository funziona.
-    Se fallisce per ACCESS_VIOLATION (0xC0000005) la funzione lancia automaticamente la pipeline di riparo locale.
+    Finds the WinGet executable location.
     #>
-    Write-StyledMessage -Type Info -Text "🔍 Test stringente di networking Winget..."
     try {
+        $wingetPathToResolve = Join-Path -Path $ENV:ProgramFiles -ChildPath 'Microsoft.DesktopAppInstaller_*_*__8wekyb3d8bbwe'
+        $resolveWingetPath = Resolve-Path -Path $wingetPathToResolve -ErrorAction Stop | Sort-Object {
+            [version]($_.Path -replace '^[^\d]+_((\d+\.)*\d+)_.*', '$1')
+        }
+
+        if ($resolveWingetPath) {
+            $wingetPath = $resolveWingetPath[-1].Path
+        }
+
+        $wingetExe = Join-Path $wingetPath 'winget.exe'
+
+        if (Test-Path -Path $wingetExe) {
+            return $wingetExe
+        }
+        return $null
+    }
+    catch {
+        return $null
+    }
+}
+
+function Test-VCRedistInstalled {
+    <#
+    .SYNOPSIS
+    Checks if Visual C++ Redistributable is installed and verifies the major version is 14.
+    #>
+
+    $64BitOS = [System.Environment]::Is64BitOperatingSystem
+    $64BitProcess = [System.Environment]::Is64BitProcess
+
+    # Require running system native process
+    if ($64BitOS -and -not $64BitProcess) {
+        Write-StyledMessage -Type Warning -Text "Esegui PowerShell nativo (x64)."
+        return $false
+    }
+
+    # Check registry
+    $registryPath = [string]::Format(
+        'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\{0}\Microsoft\VisualStudio\14.0\VC\Runtimes\X{1}',
+        $(if ($64BitOS -and $64BitProcess) { 'WOW6432Node' } else { '' }),
+        $(if ($64BitOS) { '64' } else { '86' })
+    )
+
+    $registryExists = Test-Path -Path $registryPath
+
+    # Check major version
+    $majorVersion = if ($registryExists) {
+        (Get-ItemProperty -Path $registryPath -Name 'Major' -ErrorAction SilentlyContinue).Major
+    }
+    else { 0 }
+
+    # Check DLL exists
+    $dllPath = [string]::Format('{0}\system32\concrt140.dll', $env:windir)
+    $dllExists = [System.IO.File]::Exists($dllPath)
+
+    return $registryExists -and $majorVersion -eq 14 -and $dllExists
+}
+
+function Test-WingetDeepValidation {
+    Write-StyledMessage -Type Info -Text "🔍 Esecuzione test profondo di Winget (ricerca pacchetti in rete)..."
+
+    try {
+        # Testa connettività ai repository, integrità del DB locale e parser Winget
+        # Esegue ricerca diretta per ottenere ExitCode corretto
         $searchResult = & winget search "Git.Git" --accept-source-agreements 2>&1
         $exitCode = $LASTEXITCODE
-        
-        # Intercetta il crash noto dovuto alla corruzione index repository locale
+
+        # Check for access violation crash (0xC0000005 = -1073741819 or 3221225781)
         if ($exitCode -eq -1073741819 -or $exitCode -eq 3221225781) {
+            Write-StyledMessage -Type Warning -Text "⚠️ Crash rilevato (ExitCode: $exitCode = ACCESS_VIOLATION). Tentativo ripristino avanzato..."
+
+            # 1. Prova prima il ripristino DB + Reset Appx
             $null = Repair-WingetDatabase
+
+            Write-StyledMessage -Type Info -Text "🔄 Ripetizione test dopo ripristino database..."
             Start-Sleep 3
-            # Secondo tentativo post-cura
             $searchResult = & winget search "Git.Git" --accept-source-agreements 2>&1
             $exitCode = $LASTEXITCODE
+
+            # 2. Se crasha ancora, prova la reinstallazione completa
+            if ($exitCode -eq -1073741819 -or $exitCode -eq 3221225781) {
+                Write-StyledMessage -Type Warning -Text "⚠️ Crash persistente. Avvio reinstallazione completa Winget..."
+                $null = Install-WingetPackage
+
+                Write-StyledMessage -Type Info -Text "🔄 Test finale dopo reinstallazione..."
+                Start-Sleep 3
+                $searchResult = & winget search "Git.Git" --accept-source-agreements 2>&1
+                $exitCode = $LASTEXITCODE
+            }
         }
-        return ($exitCode -eq 0)
-    } catch {
+
+        if ($exitCode -eq 0) {
+            Write-StyledMessage -Type Success -Text "✅ Test profondo superato: Winget comunica correttamente con i repository."
+            return $true
+        }
+        # Logga i dettagli per debug
+        $errorDetails = $searchResult | Out-String
+        if ($errorDetails.Length -gt 200) {
+            $errorDetails = $errorDetails.Substring(0, 200) + "..."
+        }
+        Write-StyledMessage -Type Warning -Text "⚠️ Test profondo fallito: ExitCode=$exitCode. Dettagli: $errorDetails"
+        return $false
+    }
+    catch {
+        Write-StyledMessage -Type Error -Text "❌ Errore durante il test profondo di Winget: $($_.Exception.Message)"
         return $false
     }
 }
 
-function Install-WingetCore {
+function Install-NuGetIfRequired {
     <#
     .SYNOPSIS
-    Rimedio estremo: scarica il pacchetto standalone MSIX e lo re-installa saltando gli intermediari.
+    Checks if NuGet PackageProvider is installed and installs it if required.
     #>
-    Write-StyledMessage -Type Info -Text "🛠️ Dowload sorgenti e sovrascrittura forzata blocco Winget..."
+
+    if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
+        if ($PSVersionTable.PSVersion.Major -lt 7) {
+            try {
+                Install-PackageProvider -Name "NuGet" -Force -ForceBootstrap -ErrorAction SilentlyContinue *>$null
+                Write-StyledMessage -Type Info -Text "NuGet provider installato."
+            }
+            catch {
+                Write-StyledMessage -Type Warning -Text "Impossibile installare NuGet provider."
+            }
+        }
+    }
+}
+
+function Install-WingetCore {
+    Write-StyledMessage -Type Info -Text "🛠️ Avvio procedura di ripristino Winget (Core)..."
+
+    $oldProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+
+    function Get-WingetDownloadUrl {
+        param([string]$Match)
+        try {
+            $latest = Invoke-RestMethod -Uri "https://api.github.com/repos/microsoft/winget-cli/releases/latest" -UseBasicParsing
+            $asset = $latest.assets | Where-Object { $_.name -match $Match } | Select-Object -First 1
+            if ($asset) {
+                return $asset.browser_download_url
+            }
+            throw "Asset '$Match' non trovato."
+        }
+        catch {
+            Write-StyledMessage -Type Warning -Text "Errore recupero URL asset: $($_.Exception.Message)"
+            return $null
+        }
+    }
+
     $tempDir = "$env:TEMP\WinToolkitWinget"
-    if (-not (Test-Path $tempDir)) { New-Item -Path $tempDir -ItemType Directory -Force | Out-Null }
+    if (-not (Test-Path $tempDir)) {
+        New-Item -Path $tempDir -ItemType Directory -Force *>$null
+    }
+
     try {
-        $wingetUrl = (Invoke-RestMethod -Uri "https://api.github.com/repos/microsoft/winget-cli/releases/latest" -UseBasicParsing).assets | Where-Object { $_.name -match 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle' } | Select-Object -First 1 | Select-Object -ExpandProperty browser_download_url
+        # 1. Visual C++ Redistributable (usando test avanzato)
+        if (-not (Test-VCRedistInstalled)) {
+            Write-StyledMessage -Type Info -Text "Installazione Visual C++ Redistributable..."
+            $arch = if ([Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" }
+            $vcUrl = "https://aka.ms/vs/17/release/vc_redist.$arch.exe"
+            $vcFile = Join-Path $tempDir "vc_redist.exe"
+
+            Invoke-WebRequest -Uri $vcUrl -OutFile $vcFile -UseBasicParsing
+            $procParams = @{
+                FilePath     = $vcFile
+                ArgumentList = @("/install", "/quiet", "/norestart")
+                Wait         = $true
+                NoNewWindow  = $true
+            }
+            Start-Process @procParams
+            Write-StyledMessage -Type Success -Text "Visual C++ Redistributable installato."
+        }
+        else {
+            Write-StyledMessage -Type Success -Text "Visual C++ Redistributable già presente."
+        }
+
+        # 2. Dipendenze (UI.Xaml, VCLibs) — Estrazione dal pacchetto ufficiale (Metodo Sicuro)
+        Write-StyledMessage -Type Info -Text "Download dipendenze Winget dal repository ufficiale..."
+        $depUrl = Get-WingetDownloadUrl -Match 'DesktopAppInstaller_Dependencies.zip'
+        if ($depUrl) {
+            $depZip = Join-Path $tempDir "dependencies.zip"
+            try {
+                $iwrDepParams = @{
+                    Uri             = $depUrl
+                    OutFile         = $depZip
+                    UseBasicParsing = $true
+                    ErrorAction     = 'Stop'
+                }
+                Invoke-WebRequest @iwrDepParams
+
+                # Estrazione e installazione mirata per architettura
+                $extractPath = Join-Path $tempDir "deps"
+                Expand-Archive -Path $depZip -DestinationPath $extractPath -Force
+
+                $archPattern = if ([Environment]::Is64BitOperatingSystem) { "x64|ne" } else { "x86|ne" }
+                $appxFiles = Get-ChildItem -Path $extractPath -Recurse -Filter "*.appx" | Where-Object { $_.Name -match $archPattern }
+
+                foreach ($file in $appxFiles) {
+                    Write-StyledMessage -Type Info -Text "Installazione dipendenza: $($file.Name)..."
+                    Start-AppxSilentProcess -AppxPath $file.FullName
+                }
+            }
+            catch {
+                Write-StyledMessage -Type Warning -Text "Impossibile estrarre o installare le dipendenze dallo zip ufficiale. Errore: $($_.Exception.Message)"
+            }
+        }
+
+        # 3. Winget Bundle
+        Write-StyledMessage -Type Info -Text "Download e installazione Winget Bundle..."
+        $wingetUrl = Get-WingetDownloadUrl -Match 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle'
         if ($wingetUrl) {
             $wingetFile = Join-Path $tempDir "winget.msixbundle"
             Invoke-WebRequest -Uri $wingetUrl -OutFile $wingetFile -UseBasicParsing
-            if (Start-AppxSilentProcess -AppxPath $wingetFile) { Write-StyledMessage -Type Success -Text "✅ WinGet installato a basso livello con successo." }
+
+            if (Start-AppxSilentProcess -AppxPath $wingetFile -Flags '-ForceApplicationShutdown') {
+                Write-StyledMessage -Type Success -Text "Winget Core installato con successo."
+            }
+            else {
+                throw "Installazione Winget Core fallita."
+            }
         }
-    } catch { }
+        return $true
+    }
+    catch {
+        Write-StyledMessage -Type Error -Text "Errore durante il ripristino Winget: $($_.Exception.Message)"
+        return $false
+    }
+    finally {
+        if (Test-Path $tempDir) {
+            Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        $ProgressPreference = $oldProgress
+    }
+}
+
+function Install-WingetPackage {
+    Write-StyledMessage -Type Info -Text "🚀 Avvio procedura installazione/verifica Winget..."
+
+    if (-not (Test-WingetCompatibility)) {
+        return $false
+    }
+
+    # Usa la funzione avanzata ForceClose
+    Invoke-ForceCloseWinget
+
+    try {
+        $ProgressPreference = 'SilentlyContinue'
+
+        # Pulizia temporanei
+        $tempPath = "$env:TEMP\WinGet"
+        if (Test-Path $tempPath) {
+            Remove-Item -Path $tempPath -Recurse -Force -ErrorAction SilentlyContinue
+            Write-StyledMessage -Type Info -Text "Cache temporanea eliminata."
+        }
+
+        # Reset sorgenti se Winget esiste
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            Write-StyledMessage -Type Info -Text "Reset sorgenti Winget..."
+            try {
+                $null = & "$env:LOCALAPPDATA\Microsoft\WindowsApps\winget.exe" source reset --force 2>$null
+            }
+            catch {}
+        }
+
+        # Installa NuGet se richiesto (basato su asheroto)
+        Write-StyledMessage -Type Info -Text "Verifica/installazione NuGet provider..."
+        Install-NuGetIfRequired
+
+        # Fallback: Installazione dipendenze NuGet
+        Write-StyledMessage -Type Info -Text "Installazione modulo Microsoft.WinGet.Client..."
+        try {
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Confirm:$false -ErrorAction Stop *>$null
+            Install-Module Microsoft.WinGet.Client -Force -AllowClobber -Confirm:$false -ErrorAction Stop *>$null
+            Import-Module Microsoft.WinGet.Client -ErrorAction SilentlyContinue
+            Write-StyledMessage -Type Success -Text "Modulo WinGet Client installato."
+        }
+        catch {
+            Write-StyledMessage -Type Warning -Text "Modulo WinGet Client: $($_.Exception.Message)"
+        }
+
+        # Riparazione via modulo
+        Write-StyledMessage -Type Info -Text "Tentativo riparazione Winget (Repair-WinGetPackageManager)..."
+        if (Get-Command Repair-WinGetPackageManager -ErrorAction SilentlyContinue) {
+            try {
+                Repair-WinGetPackageManager -Force -Latest 2>$null *>$null
+                Write-StyledMessage -Type Success -Text "Repair-WinGetPackageManager eseguito."
+            }
+            catch {
+                Write-StyledMessage -Type Warning -Text "Repair-WinGetPackageManager fallito: $($_.Exception.Message)"
+            }
+            Start-Sleep 3
+        }
+
+        # Fallback finale: installazione via MSIXBundle
+        Update-EnvironmentPath
+        if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Write-StyledMessage -Type Info -Text "Download MSIXBundle da Microsoft..."
+            $msixTempDir = $script:AppConfig.Paths.Temp
+            if (-not (Test-Path $msixTempDir)) {
+                $null = New-Item -Path $msixTempDir -ItemType Directory -Force
+            }
+            $tempInstaller = Join-Path $msixTempDir "WingetInstaller.msixbundle"
+
+            $iwrParams = @{
+                Uri             = $script:AppConfig.URLs.WingetMSIX
+                OutFile         = $tempInstaller
+                UseBasicParsing = $true
+                ErrorAction     = 'Stop'
+            }
+            Invoke-WebRequest @iwrParams
+            if (Start-AppxSilentProcess -AppxPath $tempInstaller -Flags '-ForceApplicationShutdown') {
+                Write-StyledMessage -Type Success -Text "Installazione Winget MSIX Bundle riuscita."
+            }
+            else {
+                Write-StyledMessage -Type Warning -Text "Installazione Winget MSIX Bundle fallita."
+            }
+            Remove-Item $tempInstaller -Force -ErrorAction SilentlyContinue
+            Start-Sleep 3
+        }
+
+        # Reset App Installer
+        Write-StyledMessage -Type Info -Text "Reset App Installer..."
+        try {
+            Get-AppxPackage -Name 'Microsoft.DesktopAppInstaller' | Reset-AppxPackage 2>$null
+        }
+        catch {}
+
+        # Applica permessi PATH e registrazione (basato su asheroto)
+        Set-WingetPathPermissions
+        Start-Sleep 2
+        Update-EnvironmentPath
+
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            Write-StyledMessage -Type Success -Text "✅ Winget installato e funzionante."
+            return $true
+        }
+        Write-StyledMessage -Type Error -Text "❌ Impossibile installare Winget."
+        return $false
+    }
+    catch {
+        Write-StyledMessage -Type Error -Text "Errore critico: $($_.Exception.Message)"
+        return $false
+    }
+    finally {
+        $ProgressPreference = 'Continue'
+    }
 }
 
 

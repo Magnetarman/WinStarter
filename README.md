@@ -1,5 +1,5 @@
 <p align="center">
-<img src="/img/Win-Starter.png" alt="Win-Starter-Icon">
+<img src="/img/Win-Starter.png" alt="Win-Starter-Icon" width="180">
 </p>
 
 # Win Starter: Configura Windows con un solo comando

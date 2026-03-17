@@ -30,7 +30,7 @@ Set-ItemProperty -Path $regPath -Name "PauseUpdatesImpedanceMinutes" -Value 240 
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.2.5"
+        Version = "Version 1.2.6"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -933,6 +933,41 @@ function Install-PspEnvironment {
 # ============================================================================
 # FUNZIONI CORE WINSTARTER
 # ============================================================================
+
+function Configure-PowerToysSettings {
+    <#
+    .SYNOPSIS
+    Configura PowerToys per avviarsi senza splash screen e disabilita le notifiche di Windows
+    #>
+    param([string]$PowerToysDir)
+    try {
+        $configPath = Join-Path $PowerToysDir "settings.json"
+        if (Test-Path $configPath) {
+            $config = Get-Content $configPath -Raw | ConvertFrom-Json
+            
+            # Avvio senza splash screen
+            if ($config.PowerToys -and $config.PowerToys.General) {
+                $config.PowerToys.General.ShowSplashScreen = $false
+                $config.PowerToys.General.StartupBehavior = "Minimized"
+            }
+            
+            # Disabilita notifiche di PowerToys
+            if ($config.PowerToys -and $config.PowerToys.General) {
+                $config.PowerToys.General.ShowNotifications = $false
+            }
+            
+            # Salva configurazione modificata
+            $config | ConvertTo-Json -Depth 32 | Set-Content $configPath -Encoding UTF8
+            Write-StyledMessage -Type Success -Text "✅ PowerToys configurato: avvio minimizzato e notifiche disabilitate."
+        }
+        else {
+            Write-StyledMessage -Type Warning -Text "⚠️ File settings.json di PowerToys non trovato."
+        }
+    }
+    catch {
+        Write-StyledMessage -Type Warning -Text "⚠️ Errore configurazione PowerToys: $($_.Exception.Message)"
+    }
+}
 
 function SetRecommendedUpdate {
     <#

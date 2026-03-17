@@ -51,11 +51,11 @@ irm https://magnetarman.com/winstarter | iex
 
 6. Segui le istruzioni a video; al termine troverai sul Desktop la scorciatoia **Win Support** (assistenza remota) e un ambiente già configurato.
 
-## 🪱 Bug Noti - Fix in corso…
+## 🐛 Bug Noti - Fix in corso…
 
 - Barre di progressione non correttamente soppresse nell'output
 - PowerToys avvia lo splash screen generale, dovrebbe avviarsi ridotto ad icona senza splash screen
-- Disabilitazione delle notifiche di PowerToys
+- Disabilitazione delle notifiche di PowerToys nelle notifiche di windows
 - 
 
 ---

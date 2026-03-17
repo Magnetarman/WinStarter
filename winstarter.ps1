@@ -21,6 +21,26 @@ $Global:MsgStyles = @{
     Progress = @{ Icon = '🔄'; Color = 'Magenta' }
 }
 
+# --- BLOCCO TEMPORANEO CONNESSIONE A CONSUMO ---
+# Impedisce a Windows Update di scaricare aggiornamenti durante l'esecuzione
+Write-Host "🌐 Verifica connettività per blocco temporaneo aggiornamenti..." -ForegroundColor Cyan
+$activeProfile = Get-NetConnectionProfile | Where-Object { $_.IPv4Connectivity -eq 'Internet' -or $_.IPv6Connectivity -eq 'Internet' }
+
+if ($activeProfile) {
+    $guid = $activeProfile.InstanceGuid
+    $networkName = $activeProfile.Name
+    $regPathMetered = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles\$guid"
+
+    try {
+        Set-ItemProperty -Path $regPathMetered -Name "Cost" -Value 2 -ErrorAction Stop
+        Write-Host "✅ La rete '$networkName' è stata impostata come 'A Consumo' per bloccare gli aggiornamenti." -ForegroundColor Green
+    } catch {
+        Write-Host "⚠️ Impossibile impostare la rete come 'A Consumo'. Assicurati di avere privilegi di Amministratore." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "⚠️ Nessuna connessione attiva a Internet trovata per il blocco 'A Consumo'." -ForegroundColor Yellow
+}
+
 # --- IMPOSTAZIONI WINDOWS UPDATE ---
 # Sospensione aggiornamenti e protezione dai driver/riavvii forzati
 Write-Host "⚡ Configurazione impostazioni Windows Update (Driver, Deferral, No-Reboot)..." -ForegroundColor Cyan
@@ -62,7 +82,7 @@ try { Restart-Service -Name wuauserv -Force -ErrorAction SilentlyContinue } catc
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.3.0"
+        Version = "Version 1.3.1"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -1491,6 +1511,19 @@ function Invoke-WinStarterSetup {
         }
 
         Write-StyledMessage -Type Success -Text "🎉 Configurazione Win Starter conclusa brillantemente! Il sistema è pronto."
+
+        # --- RIPRISTINO CONNESSIONE ILLIMITATA ---
+        Write-Host "🌐 Ripristino connettività standard..." -ForegroundColor Cyan
+        $activeProfile = Get-NetConnectionProfile | Where-Object { $_.IPv4Connectivity -eq 'Internet' -or $_.IPv6Connectivity -eq 'Internet' }
+        if ($activeProfile) {
+            $guid = $activeProfile.InstanceGuid
+            $regPathMetered = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles\$guid"
+            try {
+                Set-ItemProperty -Path $regPathMetered -Name "Cost" -Value 1 -ErrorAction Stop
+                Write-Host "✅ Connettività ripristinata su 'Illimitata'." -ForegroundColor Green
+            } catch { }
+        }
+
         Write-Host "Premi un tasto per uscire..."
         $null = [Console]::ReadKey($true)
         exit 0

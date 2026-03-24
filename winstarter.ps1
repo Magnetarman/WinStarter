@@ -89,7 +89,7 @@ try { Restart-Service -Name wuauserv -Force -ErrorAction SilentlyContinue } catc
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.3.8"
+        Version = "Version 1.4.0"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -310,9 +310,34 @@ function Add-ToEnvironmentPath {
     <#
     .SYNOPSIS
     Aggiunge una stringa PATH alle variabili utente o di sistema in modo persistente.
+    Portato da winget-install (asheroto): usa la variabile letterale per evitare
+    problemi con percorsi profilo cambiati o caratteri non latini.
     #>
-    param ([string]$PathToAdd, [string]$Scope)
-    # Check locale omesso per brevità, se serve lo inseriremo in futuri fix
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$PathToAdd,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('User', 'System')]
+        [string]$Scope
+    )
+
+    # Check esistenza nel PATH attuale (confronto case-insensitive)
+    if ($Scope -eq 'System') {
+        $current = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+        if (($current -split ';') -notcontains $PathToAdd) {
+            [Environment]::SetEnvironmentVariable('Path', "$current;$PathToAdd", 'Machine')
+        }
+    } elseif ($Scope -eq 'User') {
+        $current = [Environment]::GetEnvironmentVariable('Path', 'User')
+        if (($current -split ';') -notcontains $PathToAdd) {
+            [Environment]::SetEnvironmentVariable('Path', "$current;$PathToAdd", 'User')
+        }
+    }
+
+    # Aggiorna anche il processo corrente
+    if (($env:Path -split ';') -notcontains $PathToAdd) {
+        $env:Path += ";$PathToAdd"
+    }
 }
 
 function Set-PathPermissions {
@@ -336,17 +361,22 @@ function Set-PathPermissions {
 function Set-WingetPathPermissions {
     <#
     .SYNOPSIS
-    Localizza la directory di installazione dinamica di Winget e ne corregge in permessi bloccati.
+    Localizza la directory di installazione dinamica di Winget, corregge i permessi
+    bloccati e aggiunge il percorso al PATH di sistema in modo persistente.
     #>
     $wingetFolderPath = $null
     try {
-        $arch = if ([Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" }
-        $wingetDir = Get-ChildItem -Path "$env:ProgramFiles\WindowsApps" -Filter "Microsoft.DesktopAppInstaller_*_*${arch}__8wekyb3d8bbwe" -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+        $arch = if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' }
+        $wingetDir = Get-ChildItem -Path "$env:ProgramFiles\WindowsApps" `
+            -Filter "Microsoft.DesktopAppInstaller_*_*${arch}__8wekyb3d8bbwe" `
+            -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
         if ($wingetDir) { $wingetFolderPath = $wingetDir.FullName }
     }
     catch { }
     if ($wingetFolderPath) {
         Set-PathPermissions -FolderPath $wingetFolderPath
+        try { Add-ToEnvironmentPath -PathToAdd $wingetFolderPath -Scope 'System' } catch { }
+        Write-StyledMessage -Type Info -Text "PATH di sistema aggiornato con la directory Winget."
     }
 }
 
@@ -664,18 +694,32 @@ function Install-WingetCore {
             }
         }
 
-        # 3. Winget Bundle
+        # 3. Winget Bundle — tenta prima via Add-AppxPackage, poi con licenza (server/policy-locked)
         Write-StyledMessage -Type Info -Text "Download e installazione Winget Bundle..."
         $wingetUrl = Get-WingetDownloadUrl -Match 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle'
         if ($wingetUrl) {
             $wingetFile = Join-Path $tempDir "winget.msixbundle"
             Invoke-WebRequest -Uri $wingetUrl -OutFile $wingetFile -UseBasicParsing
 
-            if (Start-AppxSilentProcess -AppxPath $wingetFile -Flags '-ForceApplicationShutdown') {
+            $installed = Start-AppxSilentProcess -AppxPath $wingetFile -Flags '-ForceApplicationShutdown'
+            if ($installed) {
                 Write-StyledMessage -Type Success -Text "Winget Core installato con successo."
-            }
-            else {
-                throw "Installazione Winget Core fallita."
+            } else {
+                # Fallback: installa con licenza esplicita (bypassa entitlement check)
+                Write-StyledMessage -Type Info -Text "Tentativo installazione provisionata con licenza..."
+                try {
+                    $licenseUrl = Get-WingetDownloadUrl -Match 'License1\.xml'
+                    if ($licenseUrl) {
+                        $licenseFile = Join-Path $tempDir "License1.xml"
+                        Invoke-WebRequest -Uri $licenseUrl -OutFile $licenseFile -UseBasicParsing
+                        Add-AppxProvisionedPackage -Online -PackagePath $wingetFile -LicensePath $licenseFile | Out-Null
+                        Write-StyledMessage -Type Success -Text "Winget Core installato via Add-AppxProvisionedPackage (licenza)."
+                    } else {
+                        throw "URL Licenza non trovata."
+                    }
+                } catch {
+                    throw "Installazione Winget Core fallita (entrambi i metodi): $($_.Exception.Message)"
+                }
             }
         }
         return $true
@@ -779,10 +823,17 @@ function Install-WingetPackage {
         }
         catch {}
 
+        # Applica fix avanzati: RegisterByFamilyName + Server Core symlink
+        Invoke-WingetRegistrationFix
+
         # Applica permessi PATH e registrazione (basato su asheroto)
         Set-WingetPathPermissions
         Start-Sleep 2
         Update-EnvironmentPath
+
+        # Aggiunge il percorso letterale %LOCALAPPDATA%\Microsoft\WindowsApps al PATH utente
+        # (tecnica da winget-install/asheroto: evita rottura su nomi utente con caratteri speciali)
+        try { Add-ToEnvironmentPath -PathToAdd '%LOCALAPPDATA%\Microsoft\WindowsApps' -Scope 'User' } catch { }
 
         if (Get-Command winget -ErrorAction SilentlyContinue) {
             Write-StyledMessage -Type Success -Text "✅ Winget installato e funzionante."
@@ -882,7 +933,9 @@ function Install-PowerShellCore {
 function Invoke-RepairWinGetPackageManagerSafe {
     <#
     .SYNOPSIS
-    Esegue Repair-WinGetPackageManager ma non fallisce quando il sistema ha già versioni più recenti delle dipendenze.
+    Esegue Repair-WinGetPackageManager ma non fallisce quando il sistema ha già
+    versioni più recenti delle dipendenze o versioni identiche già installate.
+    Gestisce i codici di errore HRESULT più comuni derivanti dallo script asheroto.
     #>
     if (-not (Get-Command Repair-WinGetPackageManager -ErrorAction SilentlyContinue)) {
         return $false
@@ -896,11 +949,74 @@ function Invoke-RepairWinGetPackageManagerSafe {
         $msg = $_.Exception.Message
         # 0x80073D06 = tentativo di installare versione precedente (già presente versione successiva)
         if ($msg -match '0x80073D06' -or $msg -match 'versione successiva' -or $msg -match 'already installed a higher version') {
-            Write-StyledMessage -Type Info -Text "Repair-WinGetPackageManager: dipendenze già più aggiornate (0x80073D06). Proseguo senza bloccare."
+            Write-StyledMessage -Type Info -Text "Repair-WinGetPackageManager: dipendenze già più aggiornate (0x80073D06). Proseguo."
             return $true
+        }
+        # 0x80073CF0 = stessa versione già presente
+        if ($msg -match '0x80073CF0' -or $msg -match 'same version already installed') {
+            Write-StyledMessage -Type Info -Text "Repair-WinGetPackageManager: stessa versione già installata (0x80073CF0). Proseguo."
+            return $true
+        }
+        # 0x80073D02 = risorse in uso (Terminal aperto) — non bloccante ma avvisiamo
+        if ($msg -match '0x80073D02') {
+            Write-StyledMessage -Type Warning -Text "Repair-WinGetPackageManager: risorse in uso (0x80073D02). Chiudi Terminal/PowerShell e riprova se necessario."
+            return $false
         }
         Write-StyledMessage -Type Warning -Text "Repair-WinGetPackageManager fallito: $msg"
         return $false
+    }
+}
+
+function Invoke-WingetRegistrationFix {
+    <#
+    .SYNOPSIS
+    Applica due fix avanzati portati da winget-install (asheroto):
+    1. RegisterByFamilyName — ultima spiaggia per riparare Winget quando Reset-AppxPackage non basta.
+    2. Symlink Server Core — corregge il crash di Winget su Windows Server Core per DLL mancante.
+    #>
+    $pkgFamily = 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe'
+
+    # --- 1. RegisterByFamilyName ---
+    Write-StyledMessage -Type Info -Text "🔧 Registrazione Winget via FamilyName..."
+    try {
+        $pkg = Get-AppxPackage -AllUsers -Name 'Microsoft.DesktopAppInstaller' -ErrorAction SilentlyContinue
+        if ($pkg) {
+            Add-AppxPackage -RegisterByFamilyName -MainPackage $pkgFamily -ErrorAction Stop
+            Write-StyledMessage -Type Success -Text "✅ Registrazione FamilyName completata."
+        } else {
+            Write-StyledMessage -Type Info -Text "Pacchetto DesktopAppInstaller non trovato, skip RegisterByFamilyName."
+        }
+    } catch {
+        $msg = $_.Exception.Message
+        if ($msg -match '0x80073D06' -or $msg -match '0x80073CF0') {
+            Write-StyledMessage -Type Info -Text "Registrazione FamilyName: versione già aggiornata o identica. OK."
+        } else {
+            Write-StyledMessage -Type Warning -Text "⚠️ Registrazione FamilyName non riuscita: $msg"
+        }
+    }
+
+    # --- 2. Fix simbolico Server Core (mancanza Windows.System.UserProfile.dll) ---
+    try {
+        $instType = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction SilentlyContinue).InstallationType
+        if ($instType -eq 'Server Core') {
+            Write-StyledMessage -Type Info -Text "🔗 Rilevato Server Core: applicazione fix symbolic link DLL Winget..."
+            $arch = if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' }
+            $wingetFolder = Get-ChildItem -Path "$env:ProgramFiles\WindowsApps" `
+                -Filter "Microsoft.DesktopAppInstaller_*_*${arch}__8wekyb3d8bbwe" `
+                -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+            if ($wingetFolder) {
+                $globDll  = Join-Path $wingetFolder.FullName 'Windows.Globalization.dll'
+                $profLink = Join-Path $wingetFolder.FullName 'Windows.System.UserProfile.dll'
+                if ((Test-Path $globDll) -and -not (Test-Path $profLink)) {
+                    New-Item -ItemType SymbolicLink -Path $profLink -Target $globDll -Force | Out-Null
+                    Write-StyledMessage -Type Success -Text "✅ Symbolic link DLL creato: Windows.System.UserProfile.dll -> Windows.Globalization.dll"
+                } else {
+                    Write-StyledMessage -Type Info -Text "Fix DLL Server Core non necessario (già presente o DLL mancante)."
+                }
+            }
+        }
+    } catch {
+        Write-StyledMessage -Type Warning -Text "⚠️ Errore fix Server Core: $($_.Exception.Message)"
     }
 }
 

@@ -8,7 +8,7 @@
 
 <p>
 	<img src="https://img.shields.io/github/license/Magnetarman/WinStarter?style=for-the-badge&logo=opensourceinitiative&logoColor=white&color=0080ff" alt="license">
-	<img src="https://img.shields.io/badge/version-1.3.8-green.svg?style=for-the-badge" alt="versione">
+	<img src="https://img.shields.io/badge/version-1.4.0-green.svg?style=for-the-badge" alt="versione">
 	<img src="https://img.shields.io/github/last-commit/Magnetarman/WinStarter?style=for-the-badge&logo=git&logoColor=white&color=9370DB" alt="last-commit">
 </p>
 

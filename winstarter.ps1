@@ -11,6 +11,10 @@
     Compatibile con: PowerShell 5.1 e 7+
 #>
 
+param(
+    [switch]$Force
+)
+
 # --- CONFIGURAZIONE GLOBALE ---
 $ErrorActionPreference = 'Stop'
 $Global:MsgStyles = @{
@@ -85,7 +89,7 @@ try { Restart-Service -Name wuauserv -Force -ErrorAction SilentlyContinue } catc
 $script:AppConfig = @{
     Header   = @{
         Title   = "Win Starter By Magnetarman"
-        Version = "Version 1.3.6"
+        Version = "Version 1.3.8"
     }
     URLs     = @{
         PowerToysConfig         = "https://github.com/Magnetarman/WinStarter/raw/refs/heads/main/Asset/PowerToys.zip"
@@ -1431,7 +1435,8 @@ function Invoke-WinStarterSetup {
         # Quando lo script viene eseguito via `irm ... | iex`, $PSCommandPath è vuoto.
         # Serve quindi una stringa di rilancio alternativa (relaunch) per UAC e switch a PS7.
         $startUrl = 'https://magnetarman.com/winstarter'
-        $scriptBlockForRelaunch = if ($PSCommandPath) { "& '$PSCommandPath'" } else { "iex (irm '$startUrl')" }
+        $forceArg = if ($Force) { ' -Force' } else { '' }
+        $scriptBlockForRelaunch = if ($PSCommandPath) { "& '$PSCommandPath'$forceArg" } else { "iex (irm '$startUrl')$forceArg" }
 
         # Check UAC for Administrator Rights e Re-Esecuzione nativa se necessario
         if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -1455,8 +1460,12 @@ function Invoke-WinStarterSetup {
             Write-StyledMessage -Type Info -Text "✨ Avvio inizializzazione ambiente Win Starter..."
             
             Update-EnvironmentPath
-            if (-not (Test-WingetFunctionality)) {
-                Write-StyledMessage -Type Warning -Text "⚠️ Winget non risponde. Auto-riparazione..."
+            if ($Force -or -not (Test-WingetFunctionality)) {
+                if ($Force) {
+                    Write-StyledMessage -Type Info -Text "🔄 Modalità Force attiva: reinstallazione Winget forzata..."
+                } else {
+                    Write-StyledMessage -Type Warning -Text "⚠️ Winget non risponde. Auto-riparazione..."
+                }
                 Install-WingetCore
                 Repair-WingetDatabase
                 Update-EnvironmentPath
@@ -1478,6 +1487,7 @@ function Invoke-WinStarterSetup {
             Start-Process @procParams
             exit
         }
+        # Nota: $scriptBlockForRelaunch include già -Force se necessario (vedi costruzione sopra)
 
         # Setup Essenziale Windows (Terminale e Ambiente Custom)
         $wtInstalled = Install-WindowsTerminalApp

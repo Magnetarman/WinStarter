@@ -8,7 +8,7 @@
 
 <p>
 	<img src="https://img.shields.io/github/license/Magnetarman/WinStarter?style=for-the-badge&logo=opensourceinitiative&logoColor=white&color=0080ff" alt="license">
-	<img src="https://img.shields.io/badge/version-1.3.7-green.svg?style=for-the-badge" alt="versione">
+	<img src="https://img.shields.io/badge/version-1.3.8-green.svg?style=for-the-badge" alt="versione">
 	<img src="https://img.shields.io/github/last-commit/Magnetarman/WinStarter?style=for-the-badge&logo=git&logoColor=white&color=9370DB" alt="last-commit">
 </p>
 
@@ -46,7 +46,11 @@ Win Starter è uno script PowerShell che automatizza la configurazione iniziale 
 5. Copia e incolla nella finestra di PowerShell il comando seguente:
 
 ```powershell
+# Avvio Normale (Maggioranza dei casi)
 irm https://magnetarman.com/winstarter | iex
+
+# Avvio con Force (Reinstallazione Winget garantita se il comando normale fallisce)
+irm https://magnetarman.com/winstarter | iex -Args @('-Force')
 ```
 
 6. Segui le istruzioni a video; al termine avrai un ambiente Windows ottimizzato e già configurato.

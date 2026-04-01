@@ -19,9 +19,21 @@ param(
     [switch]$SuppressIndividualReboot
 )
 
+# Controllo privilegi di amministratore e auto-elevazione UAC
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Warning "I permessi di Amministratore sono richiesti. Tentativo di riavvio con privilegi elevati..."
+    $params = @()
+    if ($PSBoundParameters.ContainsKey('CountdownSeconds')) { $params += "-CountdownSeconds $CountdownSeconds" }
+    if ($PSBoundParameters.ContainsKey('SuppressIndividualReboot') -and $SuppressIndividualReboot) { $params += "-SuppressIndividualReboot" }
+    
+    $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" $($params -join ' ')"
+    Start-Process powershell.exe -ArgumentList $argList -Verb RunAs
+    exit 0
+}
+
 $ErrorActionPreference = 'Stop'
 $Host.UI.RawUI.WindowTitle = "Set RustDesk By MagnetarMan"
-$ToolkitVersion = "1.0.2"
+$ToolkitVersion = "1.0.3"
 
 $RustDeskConfig = "$env:APPDATA\RustDesk\config"
 $RustDeskInstaller = "$env:LOCALAPPDATA\WinToolkit\rustdesk\rustdesk-installer.msi"
@@ -184,7 +196,7 @@ function Install-RustDesk {
     param([string]$InstallerPath)
     Write-StyledMessage -Type 'Info' -Text "Installazione RustDesk"
     try {
-        $installArgs = "/i", "`"$InstallerPath`"", "/quiet", "/norestart"
+        $installArgs = "/i", "`"$InstallerPath`"", "REINSTALLMODE=amus", "/quiet", "/norestart"
         $process = Start-Process "msiexec.exe" -ArgumentList $installArgs -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop
         Start-Sleep 10
         if ($process.ExitCode -eq 0) {
@@ -241,29 +253,83 @@ function Download-RustDeskConfigFiles {
     catch { Write-StyledMessage Error "Errore durante download configurazioni: $($_.Exception.Message)" }
 }
 
+function Initialize-RustDeskFirstRun {
+    Write-StyledMessage Info "Inizializzazione database locale RustDesk (Step B)..."
+    try {
+        $rustDeskExe = "$env:ProgramFiles\RustDesk\rustdesk.exe"
+        if (-not (Test-Path $rustDeskExe)) {
+            Write-StyledMessage Warning "Eseguibile rustdesk.exe non trovato, il Double-Pass potrebbe fallire"
+            return
+        }
+        # Avvia minimizzato/nascosto per generare config
+        Start-Process -FilePath $rustDeskExe -WindowStyle Hidden -ErrorAction SilentlyContinue 
+        Write-StyledMessage Progress "Attesa 10 secondi per l'inizializzazione..."
+        Start-Sleep -Seconds 10
+    }
+    catch { Write-StyledMessage Warning "Errore durante l'inizializzazione: $($_.Exception.Message)" }
+}
+
+function Set-RustDeskConfigPermissions {
+    Write-StyledMessage Info "Impostazione permessi sui file di configurazione..."
+    $configDir = "$env:APPDATA\RustDesk\config"
+    try {
+        if (-not (Test-Path $configDir)) { return }
+        $acl = Get-Acl $configDir
+        $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($user, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+        $acl.SetAccessRule($accessRule)
+        Set-Acl -Path $configDir -AclObject $acl -ErrorAction SilentlyContinue
+        Write-StyledMessage Success "Permessi configurati per l'utente corrente"
+    } catch { Write-StyledMessage Warning "Errore impostazione permessi: $($_.Exception.Message)" }
+}
+
+function Start-RustDeskService {
+    Write-StyledMessage Info "Avvio e impostazione servizio RustDesk su Automatico..."
+    try {
+        $service = Get-Service -Name "RustDesk" -ErrorAction SilentlyContinue
+        if ($service) {
+            Set-Service -Name "RustDesk" -StartupType Automatic
+            Start-Service -Name "RustDesk" -ErrorAction SilentlyContinue
+            Write-StyledMessage Success "Servizio RustDesk avviato su Automatico"
+        }
+    } catch { Write-StyledMessage Warning "Errore avvio servizio: $($_.Exception.Message)" }
+}
+
 Start-ToolkitLog -ToolName "SetRustDeskByMagnetarMan"
 Show-Header -SubTitle "Set RustDesk By MagnetarMan"
 
 Write-StyledMessage Info "🚀 AVVIO CONFIGURAZIONE RUSTDESK"
 
 try {
+    Write-StyledMessage Info "📋 [Step 0] Arresto preventivo servizi e processi RustDesk"
+    Stop-RustDeskComponents
+
     if (-not (Download-RustDeskInstaller -DownloadPath $RustDeskInstaller)) {
         Write-StyledMessage Error "Impossibile procedere senza l'installer"
         exit 1
     }
+    
+    Write-StyledMessage Info "📋 [Step A] Gestione Installazione e Update"
     if (-not (Install-RustDesk -InstallerPath $RustDeskInstaller)) {
         Write-StyledMessage Error "Errore durante l'installazione"
         exit 1
     }
 
-    Write-StyledMessage Info "📋 Arresto servizi e processi RustDesk"
+    Write-StyledMessage Info "📋 [Step B] Inizializzazione Primo Avvio"
+    Initialize-RustDeskFirstRun
+
+    Write-StyledMessage Info "📋 [Step C] Stop finale processi e sblocco file"
     Stop-RustDeskComponents
 
-    Write-StyledMessage Info "📋 Pulizia configurazioni"
+    Write-StyledMessage Info "📋 [Step D] Pulizia Database e Iniezione Settings"
     Clear-RustDeskConfig
-
-    Write-StyledMessage Info "📋 Download configurazioni"
     Download-RustDeskConfigFiles
+
+    Write-StyledMessage Info "📋 [Step E] Verifica e Risoluzione Permessi"
+    Set-RustDeskConfigPermissions
+
+    Write-StyledMessage Info "📋 [Step F] Riavvio del servizio principale"
+    Start-RustDeskService
 
     Write-Host ""
     Write-StyledMessage Success "🎉 CONFIGURAZIONE RUSTDESK COMPLETATA"

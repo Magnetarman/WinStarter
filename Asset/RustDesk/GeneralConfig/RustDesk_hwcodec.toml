@@ -1,0 +1,21 @@
+config = '''
+{
+  "signature": 0,
+  "ram_encode": [],
+  "ram_decode": [
+    {
+      "name": "h264",
+      "format": "H264",
+      "priority": 3,
+      "hwdevice": "AV_HWDEVICE_TYPE_NONE"
+    },
+    {
+      "name": "hevc",
+      "format": "H265",
+      "priority": 3,
+      "hwdevice": "AV_HWDEVICE_TYPE_NONE"
+    }
+  ],
+  "vram_encode": [],
+  "vram_decode": []
+}'''

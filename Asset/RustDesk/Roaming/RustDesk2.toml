@@ -1,0 +1,12 @@
+rendezvous_server = '89.168.23.158:21116'
+nat_type = 2
+serial = 0
+unlock_pin = '007dPbgOqt8egKipZ8dptvt+lTGuM='
+trusted_devices = ''
+
+[options]
+allow-auto-update = 'Y'
+av1-test = 'Y'
+custom-rendezvous-server = '89.168.23.158'
+access-mode = 'full'
+local-ip-addr = ''

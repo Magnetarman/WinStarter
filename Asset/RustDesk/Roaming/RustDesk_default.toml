@@ -1,0 +1,7 @@
+[options]
+image_quality = 'low'
+show_monitors_toolbar = 'Y'
+use_all_my_displays_for_the_remote_session = 'Y'
+view_style = 'adaptive'
+i444 = 'Y'
+show_quality_monitor = 'Y'

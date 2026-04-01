@@ -33,11 +33,11 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 
 $ErrorActionPreference = 'Stop'
 $Host.UI.RawUI.WindowTitle = "Set RustDesk By MagnetarMan"
-$ToolkitVersion = "1.0.3"
+$ToolkitVersion = "1.1.0"
 
-$RustDeskConfig = "$env:APPDATA\RustDesk\config"
+$UserPath = "$env:APPDATA\RustDesk\config"
+$SystemPath = "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config"
 $RustDeskInstaller = "$env:LOCALAPPDATA\WinToolkit\rustdesk\rustdesk-installer.msi"
-$RustDeskConfigPath = "$env:APPDATA\RustDesk\config"
 $RustDeskReleaseAPI = "https://api.github.com/repos/rustdesk/rustdesk/releases/latest"
 
 $Global:MsgStyles = @{
@@ -133,26 +133,19 @@ function Start-InterruptibleCountdown {
 }
 
 function Stop-RustDeskComponents {
-    $servicesFound = $false
-    foreach ($service in @("RustDesk", "rustdesk")) {
-        $serviceObj = Get-Service -Name $service -ErrorAction SilentlyContinue
-        if ($serviceObj) {
-            Stop-Service -Name $service -Force -ErrorAction SilentlyContinue
-            $servicesFound = $true
-        }
+    Write-StyledMessage Info "🛑 Arresto forzato componenti RustDesk..."
+    try {
+        # Arresto del servizio (gestisce errore se non esiste)
+        Stop-Service -Name "RustDesk" -Force -ErrorAction SilentlyContinue
+        
+        # Kill dei processi attivi
+        $null = taskkill /f /im rustdesk.exe 2>$null
+        
+        Write-StyledMessage Success "Servizi e processi RustDesk terminati con successo"
     }
-    if ($servicesFound) { Write-StyledMessage Success "Servizi RustDesk arrestati" }
-
-    $processesFound = $false
-    foreach ($process in @("rustdesk", "RustDesk")) {
-        $runningProcesses = Get-Process -Name $process -ErrorAction SilentlyContinue
-        if ($runningProcesses) {
-            $runningProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
-            $processesFound = $true
-        }
+    catch {
+        Write-StyledMessage Warning "Nota: Alcuni componenti erano già inattivi"
     }
-    if ($processesFound) { Write-StyledMessage Success "Processi RustDesk terminati" }
-    if (-not $servicesFound -and -not $processesFound) { Write-StyledMessage Warning "Nessun componente RustDesk attivo trovato" }
     Start-Sleep 2
 }
 
@@ -209,48 +202,50 @@ function Install-RustDesk {
     return $false
 }
 
-function Clear-RustDeskConfig {
-    Write-StyledMessage Info "Pulizia configurazioni esistenti..."
-    $configDir = "$RustDeskConfigPath\config"
-    try {
-        if (-not (Test-Path $RustDeskConfigPath)) {
-            New-Item -ItemType Directory -Path $RustDeskConfigPath -Force | Out-Null
-            Write-StyledMessage Info "Cartella RustDesk creata"
-        }
-        if (Test-Path $configDir) {
-            Remove-Item $configDir -Recurse -Force -ErrorAction Stop
-            Write-StyledMessage Success "Cartella config eliminata"
-            Start-Sleep 1
-        }
-        else { Write-StyledMessage Warning "Cartella config non trovata" }
-    }
-    catch { Write-StyledMessage Error "Errore pulizia config: $($_.Exception.Message)" }
-}
-
-function Download-RustDeskConfigFiles {
-    Write-StyledMessage Info "Download file di configurazione..."
-    $configDir = "$env:APPDATA\RustDesk\config"
-    try {
-        if (-not (Test-Path $configDir)) { New-Item -ItemType Directory -Path $configDir -Force | Out-Null }
-        $configUrls = @{
-            "RustDesk.toml"       = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/RustDesk.toml"
-            "RustDesk_local.toml" = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/RustDesk_local.toml"
-            "RustDesk2.toml"      = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/RustDesk2.toml"
-        }
-        $downloaded = 0
-        foreach ($fileName in $configUrls.Keys) {
-            $url = $configUrls[$fileName]
-            $filePath = Join-Path $configDir $fileName
-            try {
-                Invoke-WebRequest -Uri $url -OutFile $filePath -UseBasicParsing -ErrorAction Stop
-                $downloaded++
+function Inject-Configs {
+    Write-StyledMessage Info "📥 Iniezione file di configurazione differenziata..."
+    
+    $ConfigMapping = @(
+        # Mapper per UserPath
+        @{ 
+            Path = $UserPath 
+            Files = @{
+                "RustDesk2.toml"       = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/Roaming/RustDesk2.toml"
+                "RustDesk_default.toml" = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/Roaming/RustDesk_default.toml"
+                "RustDesk_local.toml"   = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/Roaming/RustDesk_local.toml"
             }
-            catch { Write-StyledMessage Error "Errore download $fileName`: $($_.Exception.Message)" }
+        },
+        # Mapper per SystemPath
+        @{ 
+            Path = $SystemPath 
+            Files = @{
+                "RustDesk2.toml"       = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/GeneralConfig/RustDesk2.toml"
+                "RustDesk_hwcodec.toml" = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/GeneralConfig/RustDesk_hwcodec.toml"
+                "RustDesk_local.toml"   = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/Roaming/RustDesk_local.toml"
+            }
         }
-        if ($downloaded -eq $configUrls.Count) { Write-StyledMessage Success "Tutti i file di configurazione scaricati ($downloaded/$($configUrls.Count))" }
-        else { Write-StyledMessage Warning "Scaricati $downloaded/$($configUrls.Count) file di configurazione" }
+    )
+
+    foreach ($map in $ConfigMapping) {
+        $targetDir = $map.Path
+        try {
+            if (-not (Test-Path $targetDir)) { 
+                New-Item -ItemType Directory -Path $targetDir -Force | Out-Null 
+                Write-StyledMessage Info "Creazione directory: $targetDir"
+            }
+
+            foreach ($fileName in $map.Files.Keys) {
+                $url = $map.Files[$fileName]
+                $filePath = Join-Path $targetDir $fileName
+                Write-StyledMessage Progress "Download $fileName -> $(Split-Path $targetDir -Leaf)"
+                Invoke-WebRequest -Uri $url -OutFile $filePath -UseBasicParsing -ErrorAction Stop
+            }
+        }
+        catch {
+            Write-StyledMessage Error "Errore durante l'iniezione in $targetDir : $($_.Exception.Message)"
+        }
     }
-    catch { Write-StyledMessage Error "Errore durante download configurazioni: $($_.Exception.Message)" }
+    Write-StyledMessage Success "Iniezione configurazioni completata"
 }
 
 function Initialize-RustDeskFirstRun {
@@ -269,18 +264,22 @@ function Initialize-RustDeskFirstRun {
     catch { Write-StyledMessage Warning "Errore durante l'inizializzazione: $($_.Exception.Message)" }
 }
 
-function Set-RustDeskConfigPermissions {
-    Write-StyledMessage Info "Impostazione permessi sui file di configurazione..."
-    $configDir = "$env:APPDATA\RustDesk\config"
+function Apply-ACL {
+    Write-StyledMessage Info "🛡️ Applicazione ACL sui profili di sistema..."
     try {
-        if (-not (Test-Path $configDir)) { return }
-        $acl = Get-Acl $configDir
-        $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-        $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($user, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
-        $acl.SetAccessRule($accessRule)
-        Set-Acl -Path $configDir -AclObject $acl -ErrorAction SilentlyContinue
-        Write-StyledMessage Success "Permessi configurati per l'utente corrente"
-    } catch { Write-StyledMessage Warning "Errore impostazione permessi: $($_.Exception.Message)" }
+        # Garantiamo che LOCAL SERVICE abbia FullControl sulla cartella di sistema
+        if (Test-Path $SystemPath) {
+            $acl = Get-Acl $SystemPath
+            $permission = "NT AUTHORITY\LOCAL SERVICE", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"
+            $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($permission)
+            $acl.SetAccessRule($accessRule)
+            Set-Acl -Path $SystemPath -AclObject $acl -ErrorAction Stop
+            Write-StyledMessage Success "Permessi LOCAL SERVICE applicati correttamente"
+        }
+    }
+    catch {
+        Write-StyledMessage Warning "Impossibile applicare ACL di sistema: $($_.Exception.Message)"
+    }
 }
 
 function Start-RustDeskService {
@@ -315,20 +314,19 @@ try {
         exit 1
     }
 
-    Write-StyledMessage Info "📋 [Step B] Inizializzazione Primo Avvio"
+    Write-StyledMessage Info "📋 [Step B] Inizializzazione Primo Avvio (Generazione ID)"
     Initialize-RustDeskFirstRun
 
-    Write-StyledMessage Info "📋 [Step C] Stop finale processi e sblocco file"
+    Write-StyledMessage Info "📋 [Step C] Stop finale componenti e sblocco file"
     Stop-RustDeskComponents
 
-    Write-StyledMessage Info "📋 [Step D] Pulizia Database e Iniezione Settings"
-    Clear-RustDeskConfig
-    Download-RustDeskConfigFiles
+    Write-StyledMessage Info "📋 [Step D] Iniezione Config Self-Hosted"
+    Inject-Configs
 
-    Write-StyledMessage Info "📋 [Step E] Verifica e Risoluzione Permessi"
-    Set-RustDeskConfigPermissions
+    Write-StyledMessage Info "📋 [Step E] Applicazione Permessi e ACL"
+    Apply-ACL
 
-    Write-StyledMessage Info "📋 [Step F] Riavvio del servizio principale"
+    Write-StyledMessage Info "📋 [Step F] Riavvio servizio RustDesk"
     Start-RustDeskService
 
     Write-Host ""

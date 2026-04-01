@@ -33,7 +33,7 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 
 $ErrorActionPreference = 'Stop'
 $Host.UI.RawUI.WindowTitle = "Set RustDesk By MagnetarMan"
-$ToolkitVersion = "1.1.0"
+$ToolkitVersion = "1.1.1"
 
 $UserPath = "$env:APPDATA\RustDesk\config"
 $SystemPath = "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config"
@@ -270,7 +270,9 @@ function Apply-ACL {
         # Garantiamo che LOCAL SERVICE abbia FullControl sulla cartella di sistema
         if (Test-Path $SystemPath) {
             $acl = Get-Acl $SystemPath
-            $permission = "NT AUTHORITY\LOCAL SERVICE", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"
+            # Utilizziamo il SID S-1-5-19 (LOCAL SERVICE) per compatibilità universale (anche su OS Italiani)
+            $sid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-19")
+            $permission = $sid, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"
             $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($permission)
             $acl.SetAccessRule($accessRule)
             Set-Acl -Path $SystemPath -AclObject $acl -ErrorAction Stop

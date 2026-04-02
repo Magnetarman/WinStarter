@@ -33,7 +33,7 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 
 $ErrorActionPreference = 'Stop'
 $Host.UI.RawUI.WindowTitle = "Set RustDesk By MagnetarMan"
-$ToolkitVersion = "1.1.2"
+$ToolkitVersion = "1.1.5"
 
 $UserPath = "$env:APPDATA\RustDesk\config"
 $SystemPath = "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config"
@@ -304,6 +304,22 @@ function Start-RustDeskService {
     catch { Write-StyledMessage Warning "Errore avvio servizio: $($_.Exception.Message)" }
 }
 
+function Set-RustDeskAutoStart {
+    Write-StyledMessage Info "Configurazione avvio automatico RustDesk all'avvio di Windows..."
+    try {
+        $rustDeskExe = "$env:ProgramFiles\RustDesk\rustdesk.exe"
+        if (-not (Test-Path $rustDeskExe)) {
+            Write-StyledMessage Warning "Eseguibile rustdesk.exe non trovato, impossibile impostare avvio automatico"
+            return
+        }
+        $regPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+        $regName = "RustDesk"
+        Set-ItemProperty -Path $regPath -Name $regName -Value "`"$rustDeskExe`"" -Type String -Force -ErrorAction Stop
+        Write-StyledMessage Success "Avvio automatico RustDesk configurato nel registro di sistema"
+    }
+    catch { Write-StyledMessage Warning "Errore configurazione avvio automatico: $($_.Exception.Message)" }
+}
+
 Start-ToolkitLog -ToolName "SetRustDeskByMagnetarMan"
 Show-Header -SubTitle "Set RustDesk By MagnetarMan"
 
@@ -313,7 +329,7 @@ try {
     $rustDeskAlreadyInstalled = Test-RustDeskInstalled
 
     # Step 0: Arresto preventivo componenti
-    Write-StyledMessage Info "📋 [Step 0] Arresto preventivo servizi e processi RustDesk"
+    Write-StyledMessage Info "📋 [Step 1] Arresto preventivo servizi e processi RustDesk"
     Stop-RustDeskComponents
 
     if ($rustDeskAlreadyInstalled) {
@@ -328,28 +344,31 @@ try {
             exit 1
         }
 
-        Write-StyledMessage Info "📋 [Step A] Gestione Installazione e Update"
+        Write-StyledMessage Info "📋 [Step 2] Gestione Installazione e Update"
         if (-not (Install-RustDesk -InstallerPath $RustDeskInstaller)) {
             Write-StyledMessage Error "Errore durante l'installazione"
             exit 1
         }
 
-        Write-StyledMessage Info "📋 [Step B] Inizializzazione Primo Avvio (Generazione ID)"
+        Write-StyledMessage Info "📋 [Step 3] Inizializzazione Primo Avvio (Generazione ID)"
         Initialize-RustDeskFirstRun
 
-        Write-StyledMessage Info "📋 [Step C] Stop finale componenti e sblocco file"
+        Write-StyledMessage Info "📋 [Step 4] Stop finale componenti e sblocco file"
         Stop-RustDeskComponents
     }
 
-    # Step D-F: Configurazione comune (iniezione, permessi, avvio servizio)
-    Write-StyledMessage Info "📋 [Step D] Iniezione Config Self-Hosted"
+    # Step 5-7: Configurazione comune (iniezione, permessi, avvio servizio)
+    Write-StyledMessage Info "📋 [Step 5] Iniezione Config Self-Hosted"
     Inject-Configs
 
-    Write-StyledMessage Info "📋 [Step E] Applicazione Permessi e ACL"
+    Write-StyledMessage Info "📋 [Step 6] Applicazione Permessi e ACL"
     Apply-ACL
 
-    Write-StyledMessage Info "📋 [Step F] Riavvio servizio RustDesk"
+    Write-StyledMessage Info "📋 [Step 7] Riavvio servizio RustDesk"
     Start-RustDeskService
+
+    Write-StyledMessage Info "📋 [Step 8] Configurazione avvio automatico Windows"
+    Set-RustDeskAutoStart
 
     Write-Host ""
     Write-StyledMessage Success "🎉 CONFIGURAZIONE RUSTDESK COMPLETATA"

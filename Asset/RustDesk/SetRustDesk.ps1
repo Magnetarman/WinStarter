@@ -33,7 +33,7 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 
 $ErrorActionPreference = 'Stop'
 $Host.UI.RawUI.WindowTitle = "Set RustDesk By MagnetarMan"
-$ToolkitVersion = "1.1.1"
+$ToolkitVersion = "1.1.2"
 
 $UserPath = "$env:APPDATA\RustDesk\config"
 $SystemPath = "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config"
@@ -215,18 +215,18 @@ function Inject-Configs {
     $ConfigMapping = @(
         # Mapper per UserPath
         @{ 
-            Path = $UserPath 
+            Path  = $UserPath 
             Files = @{
-                "RustDesk2.toml"       = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/Roaming/RustDesk2.toml"
+                "RustDesk2.toml"        = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/Roaming/RustDesk2.toml"
                 "RustDesk_default.toml" = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/Roaming/RustDesk_default.toml"
                 "RustDesk_local.toml"   = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/Roaming/RustDesk_local.toml"
             }
         },
         # Mapper per SystemPath
         @{ 
-            Path = $SystemPath 
+            Path  = $SystemPath 
             Files = @{
-                "RustDesk2.toml"       = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/GeneralConfig/RustDesk2.toml"
+                "RustDesk2.toml"        = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/GeneralConfig/RustDesk2.toml"
                 "RustDesk_hwcodec.toml" = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/GeneralConfig/RustDesk_hwcodec.toml"
                 "RustDesk_local.toml"   = "https://raw.githubusercontent.com/Magnetarman/WinStarter/refs/heads/main/Asset/RustDesk/Roaming/RustDesk_local.toml"
             }
@@ -300,7 +300,8 @@ function Start-RustDeskService {
             Start-Service -Name "RustDesk" -ErrorAction SilentlyContinue
             Write-StyledMessage Success "Servizio RustDesk avviato su Automatico"
         }
-    } catch { Write-StyledMessage Warning "Errore avvio servizio: $($_.Exception.Message)" }
+    }
+    catch { Write-StyledMessage Warning "Errore avvio servizio: $($_.Exception.Message)" }
 }
 
 Start-ToolkitLog -ToolName "SetRustDeskByMagnetarMan"

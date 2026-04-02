@@ -132,6 +132,13 @@ function Start-InterruptibleCountdown {
     return $true
 }
 
+function Test-RustDeskInstalled {
+    $exePath = "$env:ProgramFiles\RustDesk\rustdesk.exe"
+    $serviceExists = (Get-Service -Name "RustDesk" -ErrorAction SilentlyContinue) -ne $null
+    $exeExists = Test-Path $exePath
+    return ($serviceExists -or $exeExists)
+}
+
 function Stop-RustDeskComponents {
     Write-StyledMessage Info "🛑 Arresto forzato componenti RustDesk..."
     try {
@@ -302,26 +309,38 @@ Show-Header -SubTitle "Set RustDesk By MagnetarMan"
 Write-StyledMessage Info "🚀 AVVIO CONFIGURAZIONE RUSTDESK"
 
 try {
+    $rustDeskAlreadyInstalled = Test-RustDeskInstalled
+
+    # Step 0: Arresto preventivo componenti
     Write-StyledMessage Info "📋 [Step 0] Arresto preventivo servizi e processi RustDesk"
     Stop-RustDeskComponents
 
-    if (-not (Download-RustDeskInstaller -DownloadPath $RustDeskInstaller)) {
-        Write-StyledMessage Error "Impossibile procedere senza l'installer"
-        exit 1
+    if ($rustDeskAlreadyInstalled) {
+        Write-StyledMessage Warning "⚠️ RustDesk risulta già installato nel sistema"
+        Write-StyledMessage Info "📋 Procedura: sovrascrittura configurazioni su installazione preesistente"
     }
-    
-    Write-StyledMessage Info "📋 [Step A] Gestione Installazione e Update"
-    if (-not (Install-RustDesk -InstallerPath $RustDeskInstaller)) {
-        Write-StyledMessage Error "Errore durante l'installazione"
-        exit 1
+    else {
+        Write-StyledMessage Info "📋 RustDesk non risulta installato, procedura completa di installazione"
+
+        if (-not (Download-RustDeskInstaller -DownloadPath $RustDeskInstaller)) {
+            Write-StyledMessage Error "Impossibile procedere senza l'installer"
+            exit 1
+        }
+
+        Write-StyledMessage Info "📋 [Step A] Gestione Installazione e Update"
+        if (-not (Install-RustDesk -InstallerPath $RustDeskInstaller)) {
+            Write-StyledMessage Error "Errore durante l'installazione"
+            exit 1
+        }
+
+        Write-StyledMessage Info "📋 [Step B] Inizializzazione Primo Avvio (Generazione ID)"
+        Initialize-RustDeskFirstRun
+
+        Write-StyledMessage Info "📋 [Step C] Stop finale componenti e sblocco file"
+        Stop-RustDeskComponents
     }
 
-    Write-StyledMessage Info "📋 [Step B] Inizializzazione Primo Avvio (Generazione ID)"
-    Initialize-RustDeskFirstRun
-
-    Write-StyledMessage Info "📋 [Step C] Stop finale componenti e sblocco file"
-    Stop-RustDeskComponents
-
+    # Step D-F: Configurazione comune (iniezione, permessi, avvio servizio)
     Write-StyledMessage Info "📋 [Step D] Iniezione Config Self-Hosted"
     Inject-Configs
 
@@ -333,7 +352,6 @@ try {
 
     Write-Host ""
     Write-StyledMessage Success "🎉 CONFIGURAZIONE RUSTDESK COMPLETATA"
-    Write-StyledMessage Info "🔄 Per applicare le modifiche il PC verrà riavviato"
 
     if ($SuppressIndividualReboot) {
         $Global:NeedsFinalReboot = $true
